@@ -341,21 +341,64 @@ func makeCandidate(price, chg, pct *float64, ts *int64, state SessionState, sess
 	}
 }
 
-// ResolveSessionState 优先根据 Yahoo API 返回的 marketState 判定五态时段状态；若字段缺失则结合交易所时区偏移与当前时间兜底推断。
+// ResolveSessionState 根据 Yahoo API 返回的 marketState、资产类型与交易所本地时钟判定五态时段状态。
+// 注意：Yahoo 在当地午夜 00:00 后会将尚未进入盘前的休市状态标记为 PREPRE，在盘后结束后标记为 POSTPOST，
+// 且对无盘后交易的欧洲/亚太现金指数（INDEX）标记为 POST/PREPRE，需结合交易所本地时间过滤误报。
 func ResolveSessionState(marketState string, now time.Time, gmtOffsetSeconds int64) (SessionState, string) {
-	switch strings.ToUpper(strings.TrimSpace(marketState)) {
-	case "PRE", "PREPRE":
-		return StatePreMarket, "盘前 (Pre-Market)"
+	return ResolveSessionStateForType(marketState, "", now, gmtOffsetSeconds)
+}
+
+func ResolveSessionStateForType(marketState, quoteType string, now time.Time, gmtOffsetSeconds int64) (SessionState, string) {
+	raw := strings.ToUpper(strings.TrimSpace(marketState))
+	qt := strings.ToUpper(strings.TrimSpace(quoteType))
+	isIndex := qt == "INDEX"
+
+	switch raw {
 	case "REGULAR":
 		return StateRegular, "盘中 (Regular)"
-	case "POST", "POSTPOST":
-		return StatePostMarket, "盘后 (Post-Market)"
 	case "OVERNIGHT":
 		return StateOvernight, "夜盘 (Overnight)"
-	case "CLOSED":
+	case "CLOSED", "POSTPOST":
+		return StateClosed, "休市 (Closed)"
+	case "POST":
+		if !isIndex && gmtOffsetSeconds <= 0 {
+			return StatePostMarket, "盘后 (Post-Market)"
+		}
+		return StateClosed, "休市 (Closed)"
+	case "PRE":
+		if !isIndex && gmtOffsetSeconds <= 0 {
+			return StatePreMarket, "盘前 (Pre-Market)"
+		}
+		if isPreOpenWindow(now, gmtOffsetSeconds) {
+			return StatePreMarket, "盘前 (Pre-Market)"
+		}
+		return StateClosed, "休市 (Closed)"
+	case "PREPRE":
+		// PREPRE 表示“盘前尚未开始”（如亚太午夜 00:00–09:00 休市期，或美股 00:00–04:00 夜盘期）
+		if !isIndex && gmtOffsetSeconds <= 0 {
+			return inferSessionByClock(now, gmtOffsetSeconds)
+		}
+		if isPreOpenWindow(now, gmtOffsetSeconds) {
+			return StatePreMarket, "盘前 (Pre-Market)"
+		}
 		return StateClosed, "休市 (Closed)"
 	}
 	return inferSessionByClock(now, gmtOffsetSeconds)
+}
+
+func isPreOpenWindow(now time.Time, gmtOffsetSeconds int64) bool {
+	local := now.UTC().Add(time.Duration(gmtOffsetSeconds) * time.Second)
+	wd := local.Weekday()
+	if wd == time.Saturday || wd == time.Sunday {
+		return false
+	}
+	mins := local.Hour()*60 + local.Minute()
+	if gmtOffsetSeconds == 8*3600 {
+		// A股 / 港股盘前集合竞价窗口: 09:00 - 09:30
+		return mins >= 9*60 && mins < 9*60+30
+	}
+	// 日韩 (UTC+9) 与欧洲 (UTC+1/+2) 盘前窗口: 08:30 - 09:00
+	return mins >= 8*60+30 && mins < 9*60
 }
 
 func inferSessionByClock(now time.Time, gmtOffsetSeconds int64) (SessionState, string) {
@@ -383,20 +426,23 @@ func inferSessionByClock(now time.Time, gmtOffsetSeconds int64) (SessionState, s
 		}
 	}
 
-	// 亚太及欧洲时区（UTC+1 ~ UTC+9）
+	// 亚太及欧洲指数时区（UTC+1 ~ UTC+9）：仅在盘前集合竞价窗口显示盘前太阳，其余非交易时间一律为休市灰点
 	if wd == time.Saturday || wd == time.Sunday {
 		return StateClosed, "周末休市"
 	}
-	switch {
-	case mins >= 8*60+30 && mins < 9*60+30:
+	if isPreOpenWindow(now, gmtOffsetSeconds) {
 		return StatePreMarket, "盘前 (Pre-Market)"
-	case mins >= 9*60+30 && mins < 16*60+30:
-		return StateRegular, "盘中 (Regular)"
-	case mins >= 16*60+30 && mins < 17*60+30:
-		return StatePostMarket, "盘后 (Post-Market)"
-	default:
+	}
+	if gmtOffsetSeconds == 8*3600 {
+		if mins >= 9*60+30 && mins < 16*60 {
+			return StateRegular, "盘中 (Regular)"
+		}
 		return StateClosed, "休市 (Closed)"
 	}
+	if mins >= 9*60 && mins < 17*60+35 {
+		return StateRegular, "盘中 (Regular)"
+	}
+	return StateClosed, "休市 (Closed)"
 }
 
 // DetectSession 根据交易所时区偏移返回当前时段文本描述。
@@ -506,7 +552,7 @@ func parseYahooQuoteItem(item yahooQuoteItem, rttMs float64, now time.Time) (Quo
 	}
 
 	gmtSec := item.GMTOffsetMilliseconds / 1000
-	resolvedState, resolvedLabel := ResolveSessionState(item.MarketState, now, gmtSec)
+	resolvedState, resolvedLabel := ResolveSessionStateForType(item.MarketState, qt, now, gmtSec)
 	if strings.TrimSpace(item.MarketState) == "" && chosen.state != "" {
 		resolvedState = chosen.state
 		resolvedLabel = chosen.session
@@ -599,7 +645,7 @@ func ParseYahooChart(expectedSymbol string, body []byte, rttMs float64, now time
 	if m.RegularMarketPrice != nil {
 		regPrice = *m.RegularMarketPrice
 	}
-	state, session := ResolveSessionState(m.MarketState, now, m.GMTOffset)
+	state, session := ResolveSessionStateForType(m.MarketState, inst, now, m.GMTOffset)
 
 	var price, changeAbs, changePct float64
 	mode := "24h_fullday_realtime"

@@ -59,43 +59,55 @@ func TestMultiMarketGroupsCurrenciesAndIndices(t *testing.T) {
 		t.Fatalf("unexpected ChiNext quote: %+v", cnBatch["399006.SZ"])
 	}
 
-	// 2. 港股指数 (^HSI + HSTECH.HK 归一化为 ^HSTECH)
+	// 2. 港股指数 (^HSI + HSTECH.HK 归一化为 ^HSTECH)：
+	// 验证凌晨 01:20 HKT (17:20 UTC) Yahoo 返回 PREPRE 时应识别为休市 (StateClosed)，
+	// 而在早间 09:15 HKT (01:15 UTC) 集合竞价窗口时才识别为盘前 (StatePreMarket)。
 	SetActiveGroup(GroupHKIndices)
 	hkJSON := []byte(`{"quoteResponse":{"result":[` +
 		`{"symbol":"^HSI","currency":"HKD","quoteType":"INDEX","shortName":"HANG SENG INDEX","marketState":"PREPRE","gmtOffSetMilliseconds":28800000,"regularMarketPrice":23211.81,"regularMarketChange":118.44,"regularMarketChangePercent":0.5129,"regularMarketTime":1793002108},` +
-		`{"symbol":"HSTECH.HK","quoteType":"INDEX","shortName":"Hang Seng TECH Index","marketState":"PRE","gmtOffSetMilliseconds":28800000,"regularMarketPrice":3857.53,"regularMarketChange":-14.13,"regularMarketChangePercent":-0.365,"regularMarketTime":1793002108}` +
+		`{"symbol":"HSTECH.HK","quoteType":"INDEX","shortName":"Hang Seng TECH Index","marketState":"PREPRE","gmtOffSetMilliseconds":28800000,"regularMarketPrice":3857.53,"regularMarketChange":-14.13,"regularMarketChangePercent":-0.365,"regularMarketTime":1793002108}` +
 		`]}}`)
-	hkBatch, err := ParseYahooQuoteBatch(hkJSON, 110.0, time.Now())
+	midnightHK := time.Date(2026, 10, 26, 17, 20, 0, 0, time.UTC) // 2026-10-27 01:20 HKT (周二凌晨休市)
+	hkClosedBatch, err := ParseYahooQuoteBatch(hkJSON, 110.0, midnightHK)
 	if err != nil {
-		t.Fatalf("HK indices parse failed: %v", err)
+		t.Fatalf("HK indices midnight parse failed: %v", err)
 	}
-	if hkBatch["^HSI"].Quote == nil || hkBatch["^HSI"].Quote.Alias != "恒指" || hkBatch["^HSI"].Quote.State != StatePreMarket {
-		t.Fatalf("unexpected HSI quote: %+v", hkBatch["^HSI"])
+	if hkClosedBatch["^HSI"].Quote == nil || hkClosedBatch["^HSI"].Quote.Alias != "恒指" || hkClosedBatch["^HSI"].Quote.State != StateClosed {
+		t.Fatalf("expected HSI at 01:20 HKT with PREPRE to be StateClosed, got: %+v", hkClosedBatch["^HSI"].Quote)
 	}
-	if hkBatch["^HSTECH"].Quote == nil || hkBatch["^HSTECH"].Quote.Alias != "恒科" || hkBatch["^HSTECH"].Quote.State != StatePreMarket {
-		t.Fatalf("unexpected HSTECH quote: %+v", hkBatch["^HSTECH"])
+	if hkClosedBatch["^HSTECH"].Quote == nil || hkClosedBatch["^HSTECH"].Quote.Alias != "恒科" || hkClosedBatch["^HSTECH"].Quote.State != StateClosed {
+		t.Fatalf("expected HSTECH at 01:20 HKT with PREPRE to be StateClosed, got: %+v", hkClosedBatch["^HSTECH"].Quote)
 	}
 
-	// 3. 日韩与欧洲指数 (JPY, KRW, EUR & POST/CLOSED states)
+	auctionHK := time.Date(2026, 10, 26, 1, 15, 0, 0, time.UTC) // 2026-10-26 09:15 HKT (周一盘前竞价)
+	hkPreBatch, err := ParseYahooQuoteBatch(hkJSON, 110.0, auctionHK)
+	if err != nil {
+		t.Fatalf("HK indices auction parse failed: %v", err)
+	}
+	if hkPreBatch["^HSI"].Quote.State != StatePreMarket || hkPreBatch["^HSTECH"].Quote.State != StatePreMarket {
+		t.Fatalf("expected HSI/HSTECH at 09:15 HKT to be StatePreMarket, got: %v / %v", hkPreBatch["^HSI"].Quote.State, hkPreBatch["^HSTECH"].Quote.State)
+	}
+
+	// 3. 欧洲指数 (EUR & POST/POSTPOST/CLOSED 现金指数收盘后均应为 StateClosed)
 	SetActiveGroup(GroupEUIndices)
 	euJSON := []byte(`{"quoteResponse":{"result":[` +
 		`{"symbol":"^FCHI","currency":"EUR","quoteType":"INDEX","shortName":"CAC 40","marketState":"POSTPOST","gmtOffSetMilliseconds":3600000,"regularMarketPrice":7847.32,"regularMarketChange":64.50,"regularMarketChangePercent":0.8287,"regularMarketTime":1793032860},` +
-		`{"symbol":"^GDAXI","currency":"EUR","quoteType":"INDEX","shortName":"DAX P","marketState":"CLOSED","gmtOffSetMilliseconds":3600000,"regularMarketPrice":25410.84,"regularMarketChange":229.19,"regularMarketChangePercent":0.9101,"regularMarketTime":1793032214}` +
+		`{"symbol":"^GDAXI","currency":"EUR","quoteType":"INDEX","shortName":"DAX P","marketState":"POST","gmtOffSetMilliseconds":7200000,"regularMarketPrice":25410.84,"regularMarketChange":229.19,"regularMarketChangePercent":0.9101,"regularMarketTime":1793032214}` +
 		`]}}`)
-	euBatch, err := ParseYahooQuoteBatch(euJSON, 120.0, time.Now())
+	euBatch, err := ParseYahooQuoteBatch(euJSON, 120.0, midnightHK)
 	if err != nil {
 		t.Fatalf("EU indices parse failed: %v", err)
 	}
-	if euBatch["^FCHI"].Quote == nil || euBatch["^FCHI"].Quote.Alias != "CAC40" || euBatch["^FCHI"].Quote.State != StatePostMarket {
-		t.Fatalf("unexpected CAC40 quote: %+v", euBatch["^FCHI"])
+	if euBatch["^FCHI"].Quote == nil || euBatch["^FCHI"].Quote.Alias != "CAC40" || euBatch["^FCHI"].Quote.State != StateClosed {
+		t.Fatalf("unexpected CAC40 quote: %+v", euBatch["^FCHI"].Quote)
 	}
 	if euBatch["^GDAXI"].Quote == nil || euBatch["^GDAXI"].Quote.Alias != "DAX" || euBatch["^GDAXI"].Quote.State != StateClosed {
-		t.Fatalf("unexpected DAX quote: %+v", euBatch["^GDAXI"])
+		t.Fatalf("unexpected DAX quote: %+v", euBatch["^GDAXI"].Quote)
 	}
 }
 
 func TestFiveStateSessionResolutionAndFallback(t *testing.T) {
-	now := time.Date(2026, 10, 26, 14, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC) // 08:00 EDT (美股盘前时段)
 	cases := []struct {
 		raw   string
 		want  SessionState
@@ -105,7 +117,7 @@ func TestFiveStateSessionResolutionAndFallback(t *testing.T) {
 		{"PREPRE", StatePreMarket, "☼"},
 		{"REGULAR", StateRegular, "🟢"},
 		{"POST", StatePostMarket, "🔵"},
-		{"POSTPOST", StatePostMarket, "🔵"},
+		{"POSTPOST", StateClosed, "⚪"},
 		{"OVERNIGHT", StateOvernight, "☾"},
 		{"CLOSED", StateClosed, "⚪"},
 	}
@@ -114,6 +126,12 @@ func TestFiveStateSessionResolutionAndFallback(t *testing.T) {
 		if got != tc.want || got.Badge() != tc.badge {
 			t.Fatalf("ResolveSessionState(%q) = (%v, %q), want (%v, %q)", tc.raw, got, got.Badge(), tc.want, tc.badge)
 		}
+	}
+
+	// 验证 A股/港股/日韩指数在午夜 PREPRE 时必须返回休市 StateClosed，绝不能误报太阳 StatePreMarket
+	midnightCST := time.Date(2026, 10, 26, 17, 25, 0, 0, time.UTC) // 01:25 CST
+	if got, _ := ResolveSessionStateForType("PREPRE", "INDEX", midnightCST, 28800); got != StateClosed {
+		t.Fatalf("expected 01:25 CST INDEX PREPRE to be StateClosed, got %v", got)
 	}
 
 	// Clock fallback when marketState is empty

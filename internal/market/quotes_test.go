@@ -113,12 +113,12 @@ func TestFiveStateSessionResolutionAndFallback(t *testing.T) {
 		want  SessionState
 		badge string
 	}{
-		{"PRE", StatePreMarket, "☼"},
-		{"PREPRE", StatePreMarket, "☼"},
+		{"PRE", StatePreMarket, "☀"},
+		{"PREPRE", StatePreMarket, "☀"},
 		{"REGULAR", StateRegular, "🟢"},
 		{"POST", StatePostMarket, "🔵"},
 		{"POSTPOST", StateClosed, "⚪"},
-		{"OVERNIGHT", StateOvernight, "☾"},
+		{"OVERNIGHT", StateOvernight, "🌙"},
 		{"CLOSED", StateClosed, "⚪"},
 	}
 	for _, tc := range cases {

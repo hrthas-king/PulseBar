@@ -160,7 +160,7 @@ func OverlayTooltip(s app.Snapshot) string {
 	for _, v := range s.Quotes {
 		lines = append(lines, "【行情】"+v.Tooltip())
 	}
-	lines = append(lines, "注：时段信号 ☼盘前 | 🟢盘中 | 🔵盘后 | ☾夜盘 | ⚪休市（异常时右侧显示 !）。")
+	lines = append(lines, "注：时段信号 ☀早盘/盘前(黄) | 🟢盘中(绿) | 🔵盘后(蓝) | 🌙夜盘(紫) | ⚪休市(灰)（异常时右侧显示 !）。")
 	return strings.Join(lines, "\n")
 }
 
@@ -187,7 +187,7 @@ func DiagnosticsText(version string, s app.Snapshot) string {
 	}
 	groupSpec := market.GroupByID(s.MarketGroup)
 	fmt.Fprintf(&b, "\n[TickBar 多市场行情与五态时段监控 — %s]\n", groupSpec.MenuLabel)
-	fmt.Fprintf(&b, "  时段信号说明: ☼ 早盘/盘前 | 🟢 盘中 | 🔵 盘后 | ☾ 夜盘 | ⚪ 休市/周末\n\n")
+	fmt.Fprintf(&b, "  时段信号说明: ☀ 早盘/盘前(黄) | 🟢 盘中(绿) | 🔵 盘后(蓝) | 🌙 夜盘(紫) | ⚪ 休市/周末(灰)\n\n")
 	for _, v := range s.Quotes {
 		fmt.Fprintf(&b, "%s\n", v.Tooltip())
 		if q := v.Quote; q != nil {

@@ -44,13 +44,13 @@ const (
 func (s SessionState) Badge() string {
 	switch s {
 	case StatePreMarket:
-		return "☼"
+		return "☀"
 	case StateRegular:
 		return "🟢"
 	case StatePostMarket:
 		return "🔵"
 	case StateOvernight:
-		return "☾"
+		return "🌙"
 	default:
 		return "⚪"
 	}

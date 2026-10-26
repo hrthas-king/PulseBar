@@ -34,7 +34,7 @@ func TestTooltipsAndFormatting(t *testing.T) {
 	}
 
 	overlayTip := OverlayTooltip(snap)
-	if !strings.Contains(overlayTip, "198.51.100.99") || !strings.Contains(overlayTip, "NYSEArca:VOO") || !strings.Contains(overlayTip, "BOATS Real Time Price") || !strings.Contains(overlayTip, "☾") {
+	if !strings.Contains(overlayTip, "198.51.100.99") || !strings.Contains(overlayTip, "NYSEArca:VOO") || !strings.Contains(overlayTip, "BOATS Real Time Price") || !strings.Contains(overlayTip, "🌙") {
 		t.Fatalf("unexpected overlay tooltip:\n%s", overlayTip)
 	}
 

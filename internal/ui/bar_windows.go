@@ -216,6 +216,7 @@ type UI struct {
 	brushRed       uintptr
 	brushGray      uintptr
 	font           uintptr
+	symbolFont     uintptr
 	data           notifyIcon
 	icons          map[string]uintptr
 	iconCountry    string
@@ -450,6 +451,14 @@ func (u *UI) drawTextCentered(dc uintptr, text string, leftLogical, rightLogical
 	runtime.KeepAlive(ptr)
 }
 
+func (u *UI) drawSymbolCentered(dc uintptr, text string, leftLogical, rightLogical int, color uintptr) {
+	if u.symbolFont != 0 {
+		old, _, _ := selectObject.Call(dc, u.symbolFont)
+		defer selectObject.Call(dc, old)
+	}
+	u.drawTextCentered(dc, text, leftLogical, rightLogical, color)
+}
+
 func (u *UI) drawCircle(dc uintptr, brush uintptr, leftLogical, topLogical, sizeLogical int) {
 	old, _, _ := selectObject.Call(dc, brush)
 	ellipse.Call(
@@ -546,9 +555,9 @@ func (u *UI) paint(hwnd uintptr) {
 		base := quoteOffset + i*slotWidthLogical
 		switch v.EffectiveState() {
 		case market.StatePreMarket:
-			u.drawTextCentered(dc, "☼", base+2, base+18, colorRef(255, 193, 7))
+			u.drawSymbolCentered(dc, "☀", base+2, base+18, colorRef(255, 214, 10))
 		case market.StateOvernight:
-			u.drawTextCentered(dc, "☾", base+2, base+18, colorRef(226, 232, 240))
+			u.drawSymbolCentered(dc, "🌙", base+2, base+18, colorRef(192, 132, 252))
 		case market.StateRegular:
 			u.drawCircle(dc, u.brushGreen, base+6, 11, 8)
 		case market.StatePostMarket:
@@ -879,8 +888,13 @@ func (u *UI) windowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintpt
 			if u.font != 0 {
 				deleteObject.Call(u.font)
 			}
+			if u.symbolFont != 0 {
+				deleteObject.Call(u.symbolFont)
+			}
 			fontName := winapi.UTF16("Segoe UI")
+			symFontName := winapi.UTF16("Segoe UI Symbol")
 			u.font, _, _ = createFont.Call(uintptr(int(-u.px(14))), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 3, 0, uintptr(unsafe.Pointer(fontName)))
+			u.symbolFont, _, _ = createFont.Call(uintptr(int(-u.px(15))), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 4, 0, uintptr(unsafe.Pointer(symFontName)))
 			if lparam != 0 {
 				var suggested rect
 				rtlMoveMemory.Call(uintptr(unsafe.Pointer(&suggested)), lparam, unsafe.Sizeof(suggested))
@@ -922,10 +936,12 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	u.brushRed, _, _ = createSolidBrush.Call(colorRef(255, 23, 68))
 	u.brushGray, _, _ = createSolidBrush.Call(colorRef(148, 163, 184))
 	fontName := winapi.UTF16("Segoe UI")
+	symFontName := winapi.UTF16("Segoe UI Symbol")
 	u.font, _, _ = createFont.Call(uintptr(int(-u.px(14))), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 3, 0, uintptr(unsafe.Pointer(fontName)))
+	u.symbolFont, _, _ = createFont.Call(uintptr(int(-u.px(15))), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 4, 0, uintptr(unsafe.Pointer(symFontName)))
 
 	defer func() {
-		for _, obj := range []uintptr{u.font, u.bgBrush, u.brushGreen, u.brushBlue, u.brushYellow, u.brushRed, u.brushGray} {
+		for _, obj := range []uintptr{u.font, u.symbolFont, u.bgBrush, u.brushGreen, u.brushBlue, u.brushYellow, u.brushRed, u.brushGray} {
 			if obj != 0 {
 				deleteObject.Call(obj)
 			}

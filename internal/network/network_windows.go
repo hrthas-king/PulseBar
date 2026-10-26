@@ -6,7 +6,6 @@ package network
 import (
 	"encoding/binary"
 	"fmt"
-	"net"
 	"net/netip"
 	"runtime"
 	"syscall"
@@ -19,6 +18,7 @@ import (
 
 var (
 	iphlp            = winapi.DLL("iphlpapi.dll")
+	ws2_32           = winapi.DLL("ws2_32.dll")
 	getBestInterface = iphlp.NewProc("GetBestInterface")
 	getIfEntry2      = iphlp.NewProc("GetIfEntry2")
 	icmpCreate       = iphlp.NewProc("IcmpCreateFile")
@@ -28,6 +28,12 @@ var (
 	notifyAddress    = iphlp.NewProc("NotifyUnicastIpAddressChange")
 	notifyRoute      = iphlp.NewProc("NotifyRouteChange2")
 	cancelNotify     = iphlp.NewProc("CancelMibChangeNotify2")
+	wsaStartup       = ws2_32.NewProc("WSAStartup")
+	wsaSocket        = ws2_32.NewProc("socket")
+	wsaIoctlSocket   = ws2_32.NewProc("ioctlsocket")
+	wsaConnect       = ws2_32.NewProc("connect")
+	wsaSelect        = ws2_32.NewProc("select")
+	wsaCloseSocket   = ws2_32.NewProc("closesocket")
 )
 
 type ifRow2 struct {
@@ -194,15 +200,14 @@ func (p *Pinger) pingICMP(target string, timeoutMs uintptr) monitor.Probe {
 }
 
 func probeTCP443(primary, secondary string, timeout time.Duration) (monitor.Probe, bool) {
+	var wsaData [408]byte
+	wsaStartup.Call(0x0202, uintptr(unsafe.Pointer(&wsaData[0])))
 	for _, host := range []string{primary, secondary} {
-		start := time.Now()
-		conn, err := net.DialTimeout("tcp4", net.JoinHostPort(host, "443"), timeout)
-		if err == nil {
-			rtt := time.Since(start)
-			_ = conn.Close()
-			if rtt < time.Millisecond {
-				rtt = time.Millisecond
-			}
+		ip, err := ipv4(host)
+		if err != nil {
+			continue
+		}
+		if rtt, ok := dialTCP443(ip, timeout); ok {
 			return monitor.Probe{
 				Success: true,
 				Uplink:  monitor.UplinkConfirmed,
@@ -213,6 +218,63 @@ func probeTCP443(primary, secondary string, timeout time.Duration) (monitor.Prob
 		}
 	}
 	return monitor.Probe{}, false
+}
+
+func dialTCP443(ipv4LE uint32, timeout time.Duration) (time.Duration, bool) {
+	s, _, _ := wsaSocket.Call(2, 1, 6) // AF_INET, SOCK_STREAM, IPPROTO_TCP
+	if s == ^uintptr(0) || s == 0 {
+		return 0, false
+	}
+	defer wsaCloseSocket.Call(s)
+
+	nonBlock := uint32(1)
+	wsaIoctlSocket.Call(s, 0x8004667E, uintptr(unsafe.Pointer(&nonBlock))) // FIONBIO
+
+	var sa struct {
+		Family uint16
+		Port   uint16
+		Addr   uint32
+		Zero   [8]byte
+	}
+	sa.Family = 2
+	sa.Port = 0xBB01 // htons(443)
+	sa.Addr = ipv4LE
+
+	start := time.Now()
+	rc, _, _ := wsaConnect.Call(s, uintptr(unsafe.Pointer(&sa)), 16)
+	if int32(rc) == 0 {
+		rtt := time.Since(start)
+		if rtt < time.Millisecond {
+			rtt = time.Millisecond
+		}
+		return rtt, true
+	}
+
+	var writeSet struct {
+		Count uint32
+		_     uint32
+		Array [1]uintptr
+	}
+	writeSet.Count = 1
+	writeSet.Array[0] = s
+
+	var tv struct {
+		Sec  int32
+		Usec int32
+	}
+	us := timeout.Microseconds()
+	tv.Sec = int32(us / 1_000_000)
+	tv.Usec = int32(us % 1_000_000)
+
+	n, _, _ := wsaSelect.Call(0, 0, uintptr(unsafe.Pointer(&writeSet)), 0, uintptr(unsafe.Pointer(&tv)))
+	if int32(n) > 0 {
+		rtt := time.Since(start)
+		if rtt < time.Millisecond {
+			rtt = time.Millisecond
+		}
+		return rtt, true
+	}
+	return 0, false
 }
 
 type Watcher struct {

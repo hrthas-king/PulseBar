@@ -1,0 +1,453 @@
+// Package app 统一调度四条互不阻塞的工作线：网卡计数采样、ICMP 心跳、事件驱动 IP 定位与 TradingView 期货行情轮询。
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/hrthas-king/PulseBar/internal/ipinfo"
+	"github.com/hrthas-king/PulseBar/internal/market"
+	"github.com/hrthas-king/PulseBar/internal/monitor"
+)
+
+const (
+	Heartbeat         = time.Second
+	GeoPoll           = 15 * time.Minute
+	GeoCooldown       = 30 * time.Second
+	GeoManualCooldown = 2 * time.Second
+	GeoTunnelPoll     = 30 * time.Second
+	EventDebounce     = 750 * time.Millisecond
+)
+
+type Snapshot struct {
+	Status          monitor.Status `json:"status"`
+	Failures        int            `json:"consecutive_failures"`
+	Rates           monitor.Rates  `json:"rates"`
+	Probe           monitor.Probe  `json:"probe"`
+	Geo             ipinfo.Info    `json:"geo"`
+	GeoRefreshing   bool           `json:"geo_refreshing"`
+	GeoError        string         `json:"geo_error,omitempty"`
+	NIC             string         `json:"nic"`
+	NICError        string         `json:"nic_error,omitempty"`
+	WatchError      string         `json:"watch_error,omitempty"`
+	IntervalSeconds int            `json:"display_interval_seconds"`
+	EgressActive    bool           `json:"tun_or_proxy_active"`
+	Quotes          []market.View  `json:"quotes"`
+	At              time.Time      `json:"at"`
+}
+
+type Dependencies struct {
+	ReadCounters  func(string) (monitor.Counters, error)
+	Ping          func(string) monitor.Probe
+	FetchGeo      func(context.Context) (ipinfo.Info, error)
+	FetchQuotes   func(context.Context) (map[string]market.SymbolResult, error)
+	NetworkEvents <-chan struct{}
+	EgressEvents  <-chan monitor.EgressEvent
+	WatchError    string
+}
+
+type Engine struct {
+	deps        Dependencies
+	Refresh     chan struct{}
+	Interval    chan int
+	geoCooldown time.Duration
+	tunnelPoll  time.Duration
+}
+
+func New(deps Dependencies) *Engine {
+	return &Engine{
+		deps:        deps,
+		Refresh:     make(chan struct{}, 1),
+		Interval:    make(chan int, 1),
+		geoCooldown: GeoCooldown,
+		tunnelPoll:  GeoTunnelPoll,
+	}
+}
+
+func ValidInterval(seconds int) bool {
+	return seconds == 1 || seconds == 2 || seconds == 5
+}
+
+func QuotePollInterval(displaySeconds int) int {
+	if displaySeconds < 2 {
+		return 2
+	}
+	return displaySeconds
+}
+
+type gate struct{ last time.Time }
+
+func (g *gate) waitFor(now time.Time, cooldown time.Duration) time.Duration {
+	if g.last.IsZero() {
+		return 0
+	}
+	if remaining := g.last.Add(cooldown).Sub(now); remaining > 0 {
+		return remaining
+	}
+	return 0
+}
+
+type counterResult struct {
+	value monitor.Counters
+	err   error
+	epoch uint64
+}
+
+type probeResult struct {
+	value monitor.Probe
+	epoch uint64
+}
+
+type geoResult struct {
+	value ipinfo.Info
+	err   error
+	epoch uint64
+}
+
+type quoteResult struct {
+	batch map[string]market.SymbolResult
+	err   error
+	at    time.Time
+}
+
+func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
+	ctx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	defer func() { cancel(); workers.Wait() }()
+	if !ValidInterval(seconds) {
+		seconds = 2
+	}
+	counters := make(chan counterResult, 1)
+	probes := make(chan probeResult, 1)
+	geos := make(chan geoResult, 1)
+	quotesCh := make(chan quoteResult, 1)
+
+	var generation atomic.Uint64
+	var target atomic.Value
+	target.Store("1.1.1.1")
+
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		ticker := time.NewTicker(Heartbeat)
+		defer ticker.Stop()
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			gen := generation.Load()
+			c, err := e.deps.ReadCounters(target.Load().(string))
+			select {
+			case counters <- counterResult{c, err, gen}:
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		ticker := time.NewTicker(Heartbeat)
+		defer ticker.Stop()
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			gen := generation.Load()
+			address := target.Load().(string)
+			p := e.deps.Ping(address)
+			select {
+			case probes <- probeResult{p, gen}:
+			case <-ctx.Done():
+				return
+			}
+			if !p.Success {
+				if address == "1.1.1.1" {
+					target.Store("8.8.8.8")
+				} else {
+					target.Store("1.1.1.1")
+				}
+			}
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	var tracker monitor.Tracker
+	tracker.Reset()
+	var sampler monitor.Sampler
+	quoteTracker := market.NewTracker()
+
+	snapshot := Snapshot{
+		Status:          monitor.Unknown,
+		IntervalSeconds: seconds,
+		WatchError:      e.deps.WatchError,
+	}
+	display := time.NewTicker(time.Duration(seconds) * time.Second)
+	defer display.Stop()
+	poll := time.NewTicker(GeoPoll)
+	defer poll.Stop()
+	tunnelPoll := time.NewTicker(e.tunnelPoll)
+	defer tunnelPoll.Stop()
+	quoteTicker := time.NewTicker(time.Duration(QuotePollInterval(seconds)) * time.Second)
+	defer quoteTicker.Stop()
+
+	var limiter gate
+	var pending, busy, urgent bool
+	var geoGeneration uint64
+	var refreshTimer *time.Timer
+	var refreshC <-chan time.Time
+	var debounceUntil time.Time
+	var fetchCancel context.CancelFunc
+
+	var quoteBusy bool
+	var quoteFailures int
+	var quoteNextTry time.Time
+	var quoteCancel context.CancelFunc
+
+	defer func() {
+		if refreshTimer != nil {
+			refreshTimer.Stop()
+		}
+		if fetchCancel != nil {
+			fetchCancel()
+		}
+		if quoteCancel != nil {
+			quoteCancel()
+		}
+	}()
+
+	emit := func() {
+		now := time.Now()
+		snapshot.At = now
+		snapshot.Status = tracker.Status
+		snapshot.Failures = tracker.Failures
+		snapshot.Quotes = quoteTracker.Views(now, QuotePollInterval(snapshot.IntervalSeconds))
+		publish(snapshot)
+	}
+
+	armGeo := func() {
+		if refreshTimer != nil {
+			refreshTimer.Stop()
+		}
+		refreshC = nil
+		if !pending || busy || (tracker.Status == monitor.Offline && !urgent && !snapshot.EgressActive) {
+			return
+		}
+		now := time.Now()
+		cooldown := e.geoCooldown
+		if urgent {
+			cooldown = GeoManualCooldown
+		}
+		wait := limiter.waitFor(now, cooldown)
+		if debounce := debounceUntil.Sub(now); debounce > wait {
+			wait = debounce
+		}
+		if refreshTimer == nil {
+			refreshTimer = time.NewTimer(wait)
+		} else {
+			refreshTimer.Reset(wait)
+		}
+		refreshC = refreshTimer.C
+	}
+	requestGeo := func() { pending = true; armGeo() }
+
+	triggerQuoteFetch := func(force bool) {
+		if e.deps.FetchQuotes == nil || quoteBusy {
+			return
+		}
+		now := time.Now()
+		if !force && now.Before(quoteNextTry) {
+			return
+		}
+		quoteBusy = true
+		qCtx, qCancel := context.WithTimeout(ctx, 4*time.Second)
+		quoteCancel = qCancel
+		go func() {
+			defer qCancel()
+			batch, err := e.deps.FetchQuotes(qCtx)
+			select {
+			case quotesCh <- quoteResult{batch: batch, err: err, at: time.Now()}:
+			case <-ctx.Done():
+			}
+		}()
+	}
+
+	emit()
+	requestGeo()
+	triggerQuoteFetch(true)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case r := <-counters:
+			if r.epoch != generation.Load() {
+				continue
+			}
+			if r.err != nil {
+				sampler.Reset()
+				snapshot.Rates = monitor.Rates{}
+				snapshot.NIC = ""
+				snapshot.NICError = r.err.Error()
+			} else {
+				snapshot.Rates = sampler.Sample(r.value)
+				snapshot.NIC = r.value.Name
+				snapshot.NICError = ""
+			}
+		case r := <-probes:
+			if r.epoch != generation.Load() {
+				continue
+			}
+			previous := tracker.Status
+			recovered := tracker.Apply(r.value)
+			snapshot.Probe = r.value
+			if recovered && previous == monitor.Offline {
+				requestGeo()
+				quoteNextTry = time.Time{}
+				triggerQuoteFetch(true)
+			}
+			if tracker.Status != previous {
+				emit()
+				armGeo()
+			}
+		case <-e.deps.NetworkEvents:
+			generation.Add(1)
+			geoGeneration++
+			tracker.Reset()
+			sampler.Reset()
+			snapshot.Geo = ipinfo.Info{}
+			snapshot.GeoError = ""
+			snapshot.Rates = monitor.Rates{}
+			snapshot.Probe = monitor.Probe{Uplink: monitor.UplinkUnknown}
+			if fetchCancel != nil {
+				fetchCancel()
+			}
+			debounceUntil = time.Now().Add(EventDebounce)
+			urgent = true
+			requestGeo()
+			quoteNextTry = time.Time{}
+			triggerQuoteFetch(true)
+			emit()
+		case event := <-e.deps.EgressEvents:
+			snapshot.EgressActive = event.Active
+			if event.Changed {
+				debounceUntil = time.Now().Add(EventDebounce)
+				requestGeo()
+			}
+			emit()
+		case <-e.Refresh:
+			geoGeneration++
+			snapshot.Geo = ipinfo.Info{}
+			snapshot.GeoError = ""
+			if fetchCancel != nil {
+				fetchCancel()
+			}
+			urgent = true
+			debounceUntil = time.Time{}
+			requestGeo()
+			quoteNextTry = time.Time{}
+			triggerQuoteFetch(true)
+			emit()
+		case n := <-e.Interval:
+			if ValidInterval(n) {
+				snapshot.IntervalSeconds = n
+				display.Reset(time.Duration(n) * time.Second)
+				quoteTicker.Reset(time.Duration(QuotePollInterval(n)) * time.Second)
+				emit()
+			}
+		case <-poll.C:
+			requestGeo()
+		case <-tunnelPoll.C:
+			if snapshot.EgressActive {
+				requestGeo()
+			}
+		case <-quoteTicker.C:
+			triggerQuoteFetch(false)
+		case <-refreshC:
+			refreshC = nil
+			if !pending || busy || (tracker.Status == monitor.Offline && !urgent && !snapshot.EgressActive) {
+				continue
+			}
+			pending = false
+			urgent = false
+			busy = true
+			snapshot.GeoRefreshing = true
+			limiter.last = time.Now()
+			gen := geoGeneration
+			fetchCtx, lookupCancel := context.WithTimeout(ctx, 8*time.Second)
+			fetchCancel = lookupCancel
+			emit()
+			go func() {
+				defer lookupCancel()
+				info, err := e.deps.FetchGeo(fetchCtx)
+				select {
+				case geos <- geoResult{info, err, gen}:
+				case <-ctx.Done():
+				}
+			}()
+		case r := <-geos:
+			busy = false
+			snapshot.GeoRefreshing = false
+			if fetchCancel != nil {
+				fetchCancel()
+				fetchCancel = nil
+			}
+			if r.epoch == geoGeneration {
+				if r.err != nil {
+					snapshot.GeoError = r.err.Error()
+				} else {
+					snapshot.Geo = r.value
+					snapshot.GeoError = ""
+				}
+			}
+			armGeo()
+			emit()
+		case qr := <-quotesCh:
+			quoteBusy = false
+			if quoteCancel != nil {
+				quoteCancel()
+				quoteCancel = nil
+			}
+			if qr.err != nil {
+				detail := qr.err.Error()
+				var httpErr market.HTTPError
+				backoff := time.Duration(0)
+				quoteFailures++
+				if errors.As(qr.err, &httpErr) && (httpErr.StatusCode == 401 || httpErr.StatusCode == 403 || httpErr.StatusCode == 429) {
+					backoff = 60 * time.Second
+				} else {
+					shift := quoteFailures
+					if shift > 6 {
+						shift = 6
+					}
+					sec := 1 << uint(shift)
+					if sec > 60 {
+						sec = 60
+					}
+					backoff = time.Duration(sec) * time.Second
+				}
+				quoteNextTry = qr.at.Add(backoff)
+				quoteTracker.FailAll(fmt.Sprintf("TradingView 请求/解析失败 (%s)", detail))
+			} else {
+				quoteFailures = 0
+				quoteNextTry = time.Time{}
+				quoteTracker.ApplyBatch(qr.batch, qr.at)
+			}
+			emit()
+		case <-display.C:
+			emit()
+		}
+	}
+}

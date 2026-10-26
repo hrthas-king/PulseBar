@@ -1,0 +1,7 @@
+dist/
+.artifacts/
+.toolchain/
+*.exe
+*.zip
+*.tmp
+*.log

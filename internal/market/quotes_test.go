@@ -85,6 +85,24 @@ func TestParseYahooChartAndSession(t *testing.T) {
 		t.Fatalf("expected both VOO and QQQ healthy: %+v", views)
 	}
 
+	// 1 or 2 transient failures within 30s grace window should keep green (Healthy=true)
+	tr.FailAll("transient proxy switch")
+	views = tr.Views(overnightTime.Add(2*time.Second), 2)
+	if !views[0].Healthy || !views[1].Healthy {
+		t.Fatalf("expected 1 transient failure to stay healthy: %+v", views)
+	}
+	tr.FailAll("transient proxy switch 2")
+	views = tr.Views(overnightTime.Add(4*time.Second), 2)
+	if !views[0].Healthy || !views[1].Healthy {
+		t.Fatalf("expected 2 transient failures to stay healthy: %+v", views)
+	}
+	// 3rd consecutive failure should turn red (Healthy=false)
+	tr.FailAll("persistent failure 3")
+	views = tr.Views(overnightTime.Add(6*time.Second), 2)
+	if views[0].Healthy || views[1].Healthy {
+		t.Fatalf("expected 3rd consecutive failure to mark unhealthy: %+v", views)
+	}
+
 	// Inconsistent change percent must be rejected
 	badVOO := []byte(`{"chart":{"result":[{"meta":{` +
 		`"currency":"USD","symbol":"VOO","instrumentType":"ETF",` +

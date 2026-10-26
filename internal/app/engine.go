@@ -272,7 +272,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 			return
 		}
 		quoteBusy = true
-		qCtx, qCancel := context.WithTimeout(ctx, 4*time.Second)
+		qCtx, qCancel := context.WithTimeout(ctx, 6*time.Second)
 		quoteCancel = qCancel
 		go func() {
 			defer qCancel()
@@ -345,6 +345,8 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 			if event.Changed {
 				debounceUntil = time.Now().Add(EventDebounce)
 				requestGeo()
+				quoteNextTry = time.Time{}
+				triggerQuoteFetch(true)
 			}
 			emit()
 		case <-e.Refresh:
@@ -408,8 +410,13 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 				if r.err != nil {
 					snapshot.GeoError = r.err.Error()
 				} else {
+					hadErr := snapshot.GeoError != ""
 					snapshot.Geo = r.value
 					snapshot.GeoError = ""
+					if hadErr {
+						quoteNextTry = time.Time{}
+						triggerQuoteFetch(true)
+					}
 				}
 			}
 			armGeo()
@@ -428,16 +435,12 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 				var httpErr market.HTTPError
 				backoff := time.Duration(0)
 				quoteFailures++
-				if errors.As(qr.err, &httpErr) && (httpErr.StatusCode == 401 || httpErr.StatusCode == 403 || httpErr.StatusCode == 429) {
-					backoff = 60 * time.Second
+				if errors.As(qr.err, &httpErr) && httpErr.StatusCode == 429 {
+					backoff = 15 * time.Second
 				} else {
-					shift := quoteFailures
-					if shift > 6 {
-						shift = 6
-					}
-					sec := 1 << uint(shift)
-					if sec > 60 {
-						sec = 60
+					sec := quoteFailures * 2
+					if sec > 6 {
+						sec = 6
 					}
 					backoff = time.Duration(sec) * time.Second
 				}

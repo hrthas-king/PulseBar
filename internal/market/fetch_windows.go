@@ -48,7 +48,6 @@ var (
 	clientMu    sync.Mutex
 	sessHandle  uintptr
 	cachedCrumb string
-	crumbTime   time.Time
 )
 
 func ensureSessionLocked() (uintptr, error) {
@@ -61,7 +60,7 @@ func ensureSessionLocked() (uintptr, error) {
 	if s == 0 {
 		return 0, winapi.Error("WinHttpOpen", err)
 	}
-	if ok, _, err := setTimeouts.Call(s, 1000, TimeoutMillis, TimeoutMillis, TimeoutMillis); ok == 0 {
+	if ok, _, err := setTimeouts.Call(s, 800, TimeoutMillis, TimeoutMillis, TimeoutMillis); ok == 0 {
 		closeHandle.Call(s)
 		return 0, winapi.Error("WinHttpSetTimeouts", err)
 	}
@@ -75,7 +74,6 @@ func resetSessionLocked() {
 		sessHandle = 0
 	}
 	cachedCrumb = ""
-	crumbTime = time.Time{}
 }
 
 func refreshCrumbLocked(ctx context.Context, session uintptr) (string, error) {
@@ -100,7 +98,6 @@ func refreshCrumbLocked(ctx context.Context, session uintptr) (string, error) {
 		c := strings.TrimSpace(string(body))
 		if c != "" && len(c) <= 64 && !strings.ContainsAny(c, "<>{}\r\n") {
 			cachedCrumb = c
-			crumbTime = time.Now()
 			return c, nil
 		}
 		lastErr = fmt.Errorf("无效 crumb 响应")
@@ -130,13 +127,20 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 		return batch, nil
 	}
 
-	// 若 /v7/finance/quote 临时不可用，自动回退到 /v8/finance/chart 接口
-	return fetchV8FallbackLocked(ctx, session, err)
+	// 若代理节点切换或连接失效导致失败，重建会话句柄并在独立短超时下回退到 /v8/finance/chart 接口
+	resetSessionLocked()
+	fbSession, sErr := ensureSessionLocked()
+	if sErr != nil {
+		return nil, err
+	}
+	fbCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return fetchV8FallbackLocked(fbCtx, fbSession, err)
 }
 
 func fetchV7OvernightLocked(ctx context.Context, session uintptr) (map[string]SymbolResult, error) {
 	crumb := cachedCrumb
-	if crumb == "" || time.Since(crumbTime) > 25*time.Minute {
+	if crumb == "" {
 		var err error
 		crumb, err = refreshCrumbLocked(ctx, session)
 		if err != nil {

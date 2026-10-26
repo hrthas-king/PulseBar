@@ -14,7 +14,7 @@ const (
 	PrimaryHost   = "query1.finance.yahoo.com"
 	FallbackHost  = "query2.finance.yahoo.com"
 	CookieHost    = "fc.yahoo.com"
-	TimeoutMillis = 2200
+	TimeoutMillis = 1500
 )
 
 var (
@@ -147,10 +147,19 @@ func makeCandidate(price, chg, pct *float64, ts *int64, session, mode string) se
 	if ts != nil {
 		t = *ts
 	}
+	p := *price
+	c := *chg
+	cp := *pct
+	if prev := p - c; prev > 0 {
+		calc := c / prev * 100.0
+		if !math.IsNaN(calc) && !math.IsInf(calc, 0) && !isClose(calc, cp, 1e-6, 0.025) && math.Abs(calc-cp) < 0.25 {
+			cp = calc
+		}
+	}
 	return sessionCandidate{
-		price:     *price,
-		changeAbs: *chg,
-		changePct: *pct,
+		price:     p,
+		changeAbs: c,
+		changePct: cp,
 		tradeTime: t,
 		session:   session,
 		mode:      mode,
@@ -467,6 +476,7 @@ type feedState struct {
 	quote      *Quote
 	receivedAt time.Time
 	err        string
+	failures   int
 }
 
 type Tracker struct {
@@ -498,6 +508,7 @@ func (t *Tracker) ApplyBatch(batch map[string]SymbolResult, now time.Time) {
 			st.quote = &q
 			st.receivedAt = now
 			st.err = ""
+			st.failures = 0
 		} else {
 			t.Fail(sym, res.Err)
 		}
@@ -510,6 +521,7 @@ func (t *Tracker) Fail(sym, reason string) {
 			reason = reason[:180]
 		}
 		st.err = reason
+		st.failures++
 	}
 }
 
@@ -523,17 +535,25 @@ func (t *Tracker) Views(now time.Time, intervalSeconds int) []View {
 	if intervalSeconds < 2 {
 		intervalSeconds = 2
 	}
-	maxAge := math.Max(float64(2*intervalSeconds)+float64(TimeoutMillis)/1000.0, 6.0)
+	maxAge := math.Max(float64(6*intervalSeconds)+float64(TimeoutMillis)/1000.0, 30.0)
 	out := make([]View, 0, len(Symbols))
 	for _, sym := range Symbols {
 		st := t.feeds[sym]
 		var agePtr *float64
 		reason := st.err
+		healthy := false
 		if st.quote != nil && !st.receivedAt.IsZero() {
 			age := math.Max(0, now.Sub(st.receivedAt).Seconds())
 			agePtr = &age
-			if reason == "" && age > maxAge {
-				reason = "超过预期刷新时间，数据源失联"
+			if age > maxAge {
+				if reason == "" {
+					reason = "超过预期刷新时间，数据源失联"
+				}
+				healthy = false
+			} else if st.failures < 3 {
+				// 已有新鲜缓存（30s 内）时容忍 1~2 次瞬时代理切换或网络抖动，不立即闪烁红灯
+				healthy = true
+				reason = ""
 			}
 		}
 		var qCopy *Quote
@@ -544,7 +564,7 @@ func (t *Tracker) Views(now time.Time, intervalSeconds int) []View {
 		out = append(out, View{
 			Symbol:      sym,
 			Quote:       qCopy,
-			Healthy:     qCopy != nil && reason == "",
+			Healthy:     healthy,
 			Reason:      reason,
 			ReceivedAge: agePtr,
 		})

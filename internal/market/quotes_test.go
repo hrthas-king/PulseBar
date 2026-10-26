@@ -1,9 +1,42 @@
 package market
 
 import (
+	"math"
 	"testing"
 	"time"
 )
+
+func TestParseYahooQuoteBatchAllSessions(t *testing.T) {
+	batchJSON := []byte(`{"quoteResponse":{"result":[` +
+		`{"symbol":"VOO","currency":"USD","quoteType":"ETF","longName":"Vanguard S&P 500 ETF",` +
+		`"marketState":"OVERNIGHT","quoteSourceName":"BOATS Real Time Price","gmtOffSetMilliseconds":-14400000,` +
+		`"regularMarketPrice":698.58,"regularMarketChange":-3.72,"regularMarketChangePercent":-0.53,"regularMarketTime":1792785600,` +
+		`"postMarketPrice":699.53,"postMarketChange":0.95,"postMarketChangePercent":0.14,"postMarketTime":1792799914,` +
+		`"overnightMarketPrice":699.05,"overnightMarketChange":0.47,"overnightMarketChangePercent":0.06728,"overnightMarketTime":1792997930},` +
+		`{"symbol":"QQQ","currency":"USD","quoteType":"ETF","longName":"Invesco QQQ Trust",` +
+		`"marketState":"OVERNIGHT","quoteSourceName":"BOATS Real Time Price","gmtOffSetMilliseconds":-14400000,` +
+		`"regularMarketPrice":704.40,"regularMarketChange":-0.07,"regularMarketChangePercent":-0.01,"regularMarketTime":1792785600,` +
+		`"postMarketPrice":704.88,"postMarketChange":0.48,"postMarketChangePercent":0.07,"postMarketTime":1792799985,` +
+		`"overnightMarketPrice":703.55,"overnightMarketChange":-0.85,"overnightMarketChangePercent":-0.12067,"overnightMarketTime":1792997935}` +
+		`]}}`)
+
+	overnightNow := time.Date(2026, 10, 26, 6, 59, 0, 0, time.UTC)
+	batch, err := ParseYahooQuoteBatch(batchJSON, 185.0, overnightNow)
+	if err != nil {
+		t.Fatalf("unexpected ParseYahooQuoteBatch error: %v", err)
+	}
+	voo := batch["VOO"].Quote
+	qqq := batch["QQQ"].Quote
+	if voo == nil || qqq == nil {
+		t.Fatalf("expected both VOO and QQQ quotes: %+v", batch)
+	}
+	if voo.Price != 699.05 || math.Abs(voo.ChangePercent-0.06728) > 1e-4 || voo.Session != "夜盘 (Overnight BOATS)" || voo.QuoteSource != "BOATS Real Time Price" {
+		t.Fatalf("unexpected VOO overnight quote: %+v", voo)
+	}
+	if qqq.Price != 703.55 || math.Abs(qqq.ChangePercent - -0.12067) > 1e-4 || qqq.Session != "夜盘 (Overnight BOATS)" {
+		t.Fatalf("unexpected QQQ overnight quote: %+v", qqq)
+	}
+}
 
 func TestParseYahooChartAndSession(t *testing.T) {
 	vooJSON := []byte(`{"chart":{"result":[{"meta":{` +
@@ -22,23 +55,23 @@ func TestParseYahooChartAndSession(t *testing.T) {
 		`"chartPreviousClose":704.47` +
 		`}}]}}`)
 
-	// Monday 02:30 EDT = 06:30 UTC -> Overnight session
+	// Monday 02:30 EDT = 06:30 UTC -> Overnight session; baseline corrected to Friday close 698.58
 	overnightTime := time.Date(2026, 10, 26, 6, 30, 0, 0, time.UTC)
 	qVOO, err := ParseYahooChart("VOO", vooJSON, 120.0, overnightTime)
 	if err != nil {
 		t.Fatalf("unexpected VOO parse error: %v", err)
 	}
-	if qVOO.Price != 699.16 || qVOO.ChangePercent != -0.447 || qVOO.Session != "夜盘 (Overnight)" {
+	if qVOO.Price != 699.16 || math.Abs(qVOO.ChangeAbs-0.58) > 1e-4 || qVOO.Session != "夜盘 (Overnight)" {
 		t.Fatalf("unexpected VOO quote: %+v", qVOO)
 	}
 
-	// Monday 08:00 EDT = 12:00 UTC -> Pre-Market session
+	// Monday 08:00 EDT = 12:00 UTC -> Pre-Market session; baseline corrected to Friday close 704.40
 	preTime := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
 	qQQQ, err := ParseYahooChart("QQQ", qqqJSON, 110.0, preTime)
 	if err != nil {
 		t.Fatalf("unexpected QQQ parse error: %v", err)
 	}
-	if qQQQ.Price != 703.68 || qQQQ.Session != "盘前 (Pre-Market)" {
+	if qQQQ.Price != 703.68 || math.Abs(qQQQ.ChangeAbs - -0.72) > 1e-4 || qQQQ.Session != "盘前 (Pre-Market)" {
 		t.Fatalf("unexpected QQQ quote: %+v", qQQQ)
 	}
 

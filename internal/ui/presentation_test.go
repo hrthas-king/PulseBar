@@ -12,8 +12,8 @@ import (
 )
 
 func TestTooltipsAndFormatting(t *testing.T) {
-	voo := market.Quote{Symbol: "VOO", Price: 699.16, ChangePercent: -0.45, ChangeAbs: -3.14, UpdateMode: "24h_fullday_realtime", Session: "夜盘 (Overnight)", Description: "Vanguard S&P 500 ETF"}
-	qqq := market.Quote{Symbol: "QQQ", Price: 703.68, ChangePercent: -0.11, ChangeAbs: -0.79, UpdateMode: "24h_fullday_realtime", Session: "夜盘 (Overnight)", Description: "Invesco QQQ Trust"}
+	voo := market.Quote{Symbol: "VOO", Price: 699.05, ChangePercent: 0.07, ChangeAbs: 0.47, RegularPrice: 698.58, TradeTime: 1792997930, QuoteSource: "BOATS Real Time Price", UpdateMode: "overnight_boats_realtime", Session: "夜盘 (Overnight BOATS)", Description: "Vanguard S&P 500 ETF"}
+	qqq := market.Quote{Symbol: "QQQ", Price: 703.55, ChangePercent: -0.12, ChangeAbs: -0.85, RegularPrice: 704.40, TradeTime: 1792997935, QuoteSource: "BOATS Real Time Price", UpdateMode: "overnight_boats_realtime", Session: "夜盘 (Overnight BOATS)", Description: "Invesco QQQ Trust"}
 	age := 1.2
 	snap := app.Snapshot{
 		Status: monitor.Online,
@@ -28,17 +28,17 @@ func TestTooltipsAndFormatting(t *testing.T) {
 	}
 
 	trayTip := TrayTooltip(snap)
-	if !strings.Contains(trayTip, "PulseBar [SG] 正常") || !strings.Contains(trayTip, "VOO -0.45%") || !strings.Contains(trayTip, "QQQ -0.11%") {
+	if !strings.Contains(trayTip, "PulseBar [SG] 正常") || !strings.Contains(trayTip, "VOO 699.05 +0.07%") || !strings.Contains(trayTip, "QQQ 703.55 -0.12%") {
 		t.Fatalf("unexpected tray tooltip:\n%s", trayTip)
 	}
 
 	overlayTip := OverlayTooltip(snap)
-	if !strings.Contains(overlayTip, "198.51.100.99") || !strings.Contains(overlayTip, "NYSEArca:VOO") || !strings.Contains(overlayTip, "NASDAQ:QQQ") {
+	if !strings.Contains(overlayTip, "198.51.100.99") || !strings.Contains(overlayTip, "NYSEArca:VOO") || !strings.Contains(overlayTip, "BOATS Real Time Price") {
 		t.Fatalf("unexpected overlay tooltip:\n%s", overlayTip)
 	}
 
-	diag := DiagnosticsText("v0.2.0", snap)
-	if !strings.Contains(diag, "GeoPulse") || !strings.Contains(diag, "VOO") || !strings.Contains(diag, "QQQ") {
+	diag := DiagnosticsText("v0.2.1", snap)
+	if !strings.Contains(diag, "GeoPulse") || !strings.Contains(diag, "VOO") || !strings.Contains(diag, "BOATS Real Time Price") {
 		t.Fatalf("unexpected diagnostics text:\n%s", diag)
 	}
 }

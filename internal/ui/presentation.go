@@ -95,7 +95,7 @@ func QuoteSummary(s app.Snapshot) string {
 			if !v.Healthy {
 				mark = "!"
 			}
-			parts = append(parts, fmt.Sprintf("%s %+.2f%%%s", v.Symbol, v.Quote.ChangePercent, mark))
+			parts = append(parts, fmt.Sprintf("%s %.2f %+.2f%%%s", v.Symbol, v.Quote.Price, v.Quote.ChangePercent, mark))
 		} else {
 			parts = append(parts, fmt.Sprintf("%s --", v.Symbol))
 		}
@@ -183,9 +183,13 @@ func DiagnosticsText(version string, s app.Snapshot) string {
 	for _, v := range s.Quotes {
 		fmt.Fprintf(&b, "%s\n", v.Tooltip())
 		if q := v.Quote; q != nil {
-			fmt.Fprintf(&b, "  基金描述: %s | 当前时段: %s | 更新模式: %s\n", q.Description, q.SessionText(), q.UpdateMode)
-			fmt.Fprintf(&b, "  24h最新价: %.2f (常规盘收盘: %.2f) | 涨跌额: %+.2f | 涨跌幅: %+.3f%%\n", q.Price, q.RegularPrice, q.ChangeAbs, q.ChangePercent)
-			fmt.Fprintf(&b, "  昨收基准: %.2f | HTTP耗时: %.0f ms\n", q.Previous(), q.RTTMs)
+			fmt.Fprintf(&b, "  基金描述: %s | 当前时段: %s | 数据源: %s | 更新模式: %s\n", q.Description, q.SessionText(), valueOr(q.QuoteSource, "Yahoo Real-Time"), q.UpdateMode)
+			fmt.Fprintf(&b, "  当前最新价: %.2f (常规盘收盘: %.2f) | 涨跌额: %+.2f | 涨跌幅: %+.3f%%\n", q.Price, q.RegularPrice, q.ChangeAbs, q.ChangePercent)
+			tradeStr := "未知"
+			if q.TradeTime > 0 {
+				tradeStr = time.Unix(q.TradeTime, 0).UTC().Format(time.RFC3339)
+			}
+			fmt.Fprintf(&b, "  参考基准价: %.2f | 最近成交(UTC): %s | HTTP耗时: %.0f ms\n", q.Previous(), tradeStr, q.RTTMs)
 		}
 		fmt.Fprintf(&b, "\n")
 	}

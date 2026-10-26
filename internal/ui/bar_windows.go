@@ -41,8 +41,8 @@ const (
 )
 
 const (
-	compactWidthLogical = 418
-	detailWidthLogical  = 576
+	compactWidthLogical = 510
+	detailWidthLogical  = 668
 	barHeightLogical    = 30
 )
 
@@ -510,18 +510,18 @@ func (u *UI) paint(hwnd uintptr) {
 		}
 	}
 	for i, v := range views {
-		base := quoteOffset + i*160
+		base := quoteOffset + i*206
 		qBrush := u.brushRed
 		if v.Healthy {
 			qBrush = u.brushGreen
 		}
 		u.drawCircle(dc, qBrush, base+4, 11, 8)
-		u.drawTextSegment(dc, v.Symbol, base+17, base+62, colorRef(240, 240, 240))
-		text := "--.--%"
+		u.drawTextSegment(dc, v.Symbol, base+16, base+56, colorRef(240, 240, 240))
+		text := "---.-- --.--%"
 		pctColor := colorRef(170, 170, 170)
 		if v.Quote != nil {
 			pct := v.Quote.ChangePercent
-			text = fmt.Sprintf("%+.2f%%", pct)
+			text = fmt.Sprintf("%.2f %+.2f%%", v.Quote.Price, pct)
 			if math.Abs(pct) < 0.005 {
 				pctColor = colorRef(240, 240, 240)
 			} else if (pct > 0) == u.cfg.UpIsRed {
@@ -530,9 +530,9 @@ func (u *UI) paint(hwnd uintptr) {
 				pctColor = colorRef(119, 204, 153)
 			}
 		}
-		u.drawTextSegment(dc, text, base+63, base+148, pctColor)
+		u.drawTextSegment(dc, text, base+57, base+194, pctColor)
 		if i == 0 && len(views) > 1 {
-			u.drawTextSegment(dc, "|", base+149, base+159, colorRef(120, 130, 145))
+			u.drawTextSegment(dc, "|", base+195, base+205, colorRef(120, 130, 145))
 		}
 	}
 }

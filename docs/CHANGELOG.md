@@ -1,5 +1,13 @@
 # 更新记录 (Changelog)
 
+## v0.2.1 (2026-10-26)
+
+- **修复夜盘/扩展时段实时性与涨跌幅基准，并同屏展示实时价格**：
+  - 切换主行情源至带 `overnightPrice=true` 的 `/v7/finance/quote` 接口（WinHTTP 原生会话自动维护 Cookie 与 Crumb），直接获取 **Blue Ocean ATS (`BOATS Real Time Price`)** 的 `overnightMarketPrice`、`overnightMarketChange`、`overnightMarketChangePercent` 与 `overnightMarketTime` 实时成交时间戳。
+  - 修复此前 `/v8/finance/chart` 在夜盘（`20:00–04:00 ET`）期间沿用两日前收盘价（`chartPreviousClose`）计算 `fulldayChangePercent` 导致涨跌幅失真的问题；现严格以最近一个常规交易日收盘价为基准计算夜盘/盘前/盘后涨跌幅。
+  - 任务栏悬浮条直接同屏展示 **`实时成交价 + 涨跌幅`**（如 `VOO 699.48 +0.13% | QQQ 704.35 -0.01%`），使每 `$0.01` 的微小实时跳动都能在任务栏立即显现。
+  - 悬停提示与诊断面板新增展示数据源名称（如 `BOATS Real Time Price`）与最近一笔交易所成交距今秒数（`最近成交 Xs 前`）。
+
 ## v0.2.0 (2026-10-25)
 
 - **升级追踪 `VOO` 与 `QQQ` 24×5 全时段无缝实时行情**：

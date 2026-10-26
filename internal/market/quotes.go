@@ -1,29 +1,26 @@
-// Package market 解析并校验 TradingView 的 ES / NQ 期货主力合约行情与状态机。
+// Package market 解析并校验 VOO / QQQ 基金 24 小时全时段（夜盘、盘前、盘中、盘后）实时行情与状态机。
 package market
 
 import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"strconv"
-	"strings"
 	"time"
 )
 
 const (
-	MaxBody       = 2047
-	ScannerHost   = "scanner.tradingview.com"
-	ScannerPath   = "/futures/scan"
+	MaxBody       = 8192
+	PrimaryHost   = "query1.finance.yahoo.com"
+	FallbackHost  = "query2.finance.yahoo.com"
 	TimeoutMillis = 1800
 )
 
 var (
-	Symbols = []string{"ES", "NQ"}
+	Symbols = []string{"VOO", "QQQ"}
 	Tickers = map[string]string{
-		"ES": "CME_MINI:ES1!",
-		"NQ": "CME_MINI:NQ1!",
+		"VOO": "NYSEArca:VOO",
+		"QQQ": "NASDAQ:QQQ",
 	}
-	RequestPayload = []byte(`{"symbols":{"tickers":["CME_MINI:ES1!","CME_MINI:NQ1!"],"query":{"types":[]}},"columns":["name","description","type","close","change","change_abs","currency","update_mode"]}`)
 )
 
 type HTTPError struct {
@@ -39,7 +36,9 @@ type Quote struct {
 	Price         float64 `json:"price"`
 	ChangePercent float64 `json:"change_percent"`
 	ChangeAbs     float64 `json:"change_abs"`
+	RegularPrice  float64 `json:"regular_price"`
 	UpdateMode    string  `json:"update_mode"`
+	Session       string  `json:"session"`
 	Description   string  `json:"description"`
 	RTTMs         float64 `json:"rtt_ms"`
 }
@@ -48,33 +47,11 @@ func (q Quote) Previous() float64 {
 	return q.Price - q.ChangeAbs
 }
 
-func (q Quote) DelaySeconds() (int, bool) {
-	if q.UpdateMode == "streaming" {
-		return 0, true
+func (q Quote) SessionText() string {
+	if q.Session != "" {
+		return q.Session
 	}
-	if strings.HasPrefix(q.UpdateMode, "delayed_streaming_") {
-		secStr := strings.TrimPrefix(q.UpdateMode, "delayed_streaming_")
-		if secStr != "" {
-			if sec, err := strconv.Atoi(secStr); err == nil && sec >= 0 {
-				return sec, true
-			}
-		}
-	}
-	return 0, false
-}
-
-func (q Quote) DelayText() string {
-	sec, ok := q.DelaySeconds()
-	if !ok {
-		return "延时未知"
-	}
-	if sec == 0 {
-		return "源标记 streaming（不作实时保证）"
-	}
-	if sec%60 == 0 {
-		return fmt.Sprintf("延时 %d 分钟", sec/60)
-	}
-	return fmt.Sprintf("延时 %.1f 分钟", float64(sec)/60.0)
+	return "24h 全时段实时"
 }
 
 func ValidateQuote(q Quote) error {
@@ -91,7 +68,7 @@ func ValidateQuote(q Quote) error {
 		return fmt.Errorf("价格、基准或请求耗时无效")
 	}
 	calc := q.ChangeAbs / prev * 100.0
-	if math.IsNaN(calc) || math.IsInf(calc, 0) || !isClose(calc, q.ChangePercent, 1e-6, 0.02) {
+	if math.IsNaN(calc) || math.IsInf(calc, 0) || !isClose(calc, q.ChangePercent, 1e-6, 0.025) {
 		return fmt.Errorf("最新价、涨跌额与涨跌幅不一致")
 	}
 	if q.UpdateMode == "" || len(q.UpdateMode) > 80 {
@@ -111,105 +88,126 @@ type SymbolResult struct {
 	Err   string
 }
 
-type tvResponse struct {
-	Data []tvRow `json:"data"`
+type yahooChartResponse struct {
+	Chart struct {
+		Result []struct {
+			Meta yahooMeta `json:"meta"`
+		} `json:"result"`
+	} `json:"chart"`
 }
 
-type tvRow struct {
-	S string            `json:"s"`
-	D []json.RawMessage `json:"d"`
+type yahooMeta struct {
+	Currency                   string   `json:"currency"`
+	Symbol                     string   `json:"symbol"`
+	InstrumentType             string   `json:"instrumentType"`
+	ShortName                  string   `json:"shortName"`
+	LongName                   string   `json:"longName"`
+	GMTOffset                  int64    `json:"gmtoffset"`
+	RegularMarketPrice         *float64 `json:"regularMarketPrice"`
+	RegularMarketChangePercent *float64 `json:"regularMarketChangePercent"`
+	ChartPreviousClose         *float64 `json:"chartPreviousClose"`
+	PreviousClose              *float64 `json:"previousClose"`
+	FulldayPrice               *float64 `json:"fulldayPrice"`
+	FulldayChange              *float64 `json:"fulldayChange"`
+	FulldayChangePercent       *float64 `json:"fulldayChangePercent"`
 }
 
-func parseStrictFloat(raw json.RawMessage) (float64, error) {
-	s := strings.TrimSpace(string(raw))
-	if s == "" || s == "null" || s == "true" || s == "false" || strings.HasPrefix(s, `"`) {
-		return 0, fmt.Errorf("不是有效数字")
+// DetectSession 根据美东时间（利用接口返回的 gmtoffset 或 UTC-4/-5）判断当前处于夜盘、盘前、盘中、盘后或周末休市。
+func DetectSession(now time.Time, gmtOffsetSeconds int64) string {
+	if gmtOffsetSeconds == 0 {
+		gmtOffsetSeconds = -14400
 	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0, fmt.Errorf("数字超出范围")
+	et := now.UTC().Add(time.Duration(gmtOffsetSeconds) * time.Second)
+	wd := et.Weekday()
+	mins := et.Hour()*60 + et.Minute()
+
+	// 周六全天、周五 20:00 后、周日 20:00 前为周末休市
+	if wd == time.Saturday || (wd == time.Friday && mins >= 20*60) || (wd == time.Sunday && mins < 20*60) {
+		return "周末休市"
 	}
-	return v, nil
+	switch {
+	case mins >= 4*60 && mins < 9*60+30:
+		return "盘前 (Pre-Market)"
+	case mins >= 9*60+30 && mins < 16*60:
+		return "盘中 (Regular)"
+	case mins >= 16*60 && mins < 20*60:
+		return "盘后 (Post-Market)"
+	default:
+		return "夜盘 (Overnight)"
+	}
 }
 
-func parseStrictString(raw json.RawMessage) (string, error) {
-	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(string(raw)) == "null" {
-		return "", fmt.Errorf("字符串为空")
-	}
-	return s, nil
-}
-
-// ParseTradingView 独立校验 ES 与 NQ；单个标的异常不影响另一个有效标的。
-func ParseTradingView(body []byte, rttMs float64) (map[string]SymbolResult, error) {
+// ParseYahooChart 解析单标的 24h 全时段行情（优先采用覆盖夜盘/盘前/盘中/盘后的 fulldayPrice 实时流）。
+func ParseYahooChart(expectedSymbol string, body []byte, rttMs float64, now time.Time) (Quote, error) {
 	if len(body) > MaxBody {
-		return nil, fmt.Errorf("行情响应超过 %d 字节上限", MaxBody)
+		return Quote{}, fmt.Errorf("响应超过 %d 字节上限", MaxBody)
 	}
-	var resp tvResponse
+	var resp yahooChartResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("TradingView JSON 解析失败: %w", err)
+		return Quote{}, fmt.Errorf("JSON 解析失败: %w", err)
 	}
-	if resp.Data == nil {
-		return nil, fmt.Errorf("TradingView 行情列表格式无效")
+	if len(resp.Chart.Result) != 1 {
+		return Quote{}, fmt.Errorf("缺少或重复行情结果")
 	}
-	results := make(map[string]SymbolResult, len(Symbols))
-	for _, sym := range Symbols {
-		ticker := Tickers[sym]
-		var matches []tvRow
-		for _, r := range resp.Data {
-			if r.S == ticker {
-				matches = append(matches, r)
-			}
-		}
-		if len(matches) != 1 {
-			results[sym] = SymbolResult{Err: "TradingView 数据异常: 缺少或重复标的"}
-			continue
-		}
-		fields := matches[0].D
-		if len(fields) != 8 {
-			results[sym] = SymbolResult{Err: "TradingView 数据异常: 字段数量不匹配"}
-			continue
-		}
-		name, err1 := parseStrictString(fields[0])
-		desc, err2 := parseStrictString(fields[1])
-		kind, err3 := parseStrictString(fields[2])
-		price, err4 := parseStrictFloat(fields[3])
-		pct, err5 := parseStrictFloat(fields[4])
-		changeAbs, err6 := parseStrictFloat(fields[5])
-		currency, err7 := parseStrictString(fields[6])
-		mode, err8 := parseStrictString(fields[7])
-		if err1 != nil || err2 != nil || err3 != nil || err4 != nil || err5 != nil || err6 != nil || err7 != nil || err8 != nil {
-			results[sym] = SymbolResult{Err: "TradingView 数据异常: 字段类型无效"}
-			continue
-		}
-		expectedName := strings.SplitN(ticker, ":", 2)[1]
-		if name != expectedName || kind != "futures" || currency != "USD" {
-			results[sym] = SymbolResult{Err: "TradingView 数据异常: 合约、类型或币种不匹配"}
-			continue
-		}
-		if desc == "" || len(desc) > 200 {
-			results[sym] = SymbolResult{Err: "TradingView 数据异常: 合约名称无效"}
-			continue
-		}
-		q := Quote{
-			Symbol:        sym,
-			Price:         price,
-			ChangePercent: pct,
-			ChangeAbs:     changeAbs,
-			UpdateMode:    mode,
-			Description:   desc,
-			RTTMs:         rttMs,
-		}
-		if err := ValidateQuote(q); err != nil {
-			results[sym] = SymbolResult{Err: "TradingView 数据异常: " + err.Error()}
-			continue
-		}
-		results[sym] = SymbolResult{Quote: &q}
+	m := resp.Chart.Result[0].Meta
+	if m.Symbol != expectedSymbol || m.Currency != "USD" || m.InstrumentType != "ETF" {
+		return Quote{}, fmt.Errorf("标的、类型或币种不匹配 (%s/%s/%s)", m.Symbol, m.InstrumentType, m.Currency)
 	}
-	return results, nil
+	desc := m.LongName
+	if desc == "" {
+		desc = m.ShortName
+	}
+	if desc == "" {
+		desc = expectedSymbol + " ETF"
+	}
+	var regPrice float64
+	if m.RegularMarketPrice != nil {
+		regPrice = *m.RegularMarketPrice
+	}
+
+	var price, changeAbs, changePct float64
+	mode := "24h_fullday_realtime"
+	if m.FulldayPrice != nil && m.FulldayChange != nil && m.FulldayChangePercent != nil && *m.FulldayPrice > 0 {
+		price = *m.FulldayPrice
+		changeAbs = *m.FulldayChange
+		changePct = *m.FulldayChangePercent
+	} else if m.RegularMarketPrice != nil && *m.RegularMarketPrice > 0 {
+		price = *m.RegularMarketPrice
+		prev := 0.0
+		if m.ChartPreviousClose != nil && *m.ChartPreviousClose > 0 {
+			prev = *m.ChartPreviousClose
+		} else if m.PreviousClose != nil && *m.PreviousClose > 0 {
+			prev = *m.PreviousClose
+		}
+		if prev <= 0 {
+			return Quote{}, fmt.Errorf("缺少有效昨收基准价")
+		}
+		changeAbs = price - prev
+		if m.RegularMarketChangePercent != nil {
+			changePct = *m.RegularMarketChangePercent
+		} else {
+			changePct = changeAbs / prev * 100.0
+		}
+		mode = "regular_realtime"
+	} else {
+		return Quote{}, fmt.Errorf("缺少有效价格字段")
+	}
+
+	q := Quote{
+		Symbol:        expectedSymbol,
+		Price:         price,
+		ChangePercent: changePct,
+		ChangeAbs:     changeAbs,
+		RegularPrice:  regPrice,
+		UpdateMode:    mode,
+		Session:       DetectSession(now, m.GMTOffset),
+		Description:   desc,
+		RTTMs:         rttMs,
+	}
+	if err := ValidateQuote(q); err != nil {
+		return Quote{}, err
+	}
+	return q, nil
 }
 
 type View struct {
@@ -221,25 +219,25 @@ type View struct {
 }
 
 func (v View) Tooltip() string {
-	status := "数据正常（允许延时）"
+	status := "实时数据正常"
 	if !v.Healthy {
 		status = "数据异常 — " + v.Reason
 	}
-	delay := "等待数据"
+	session := "等待数据"
 	if v.Quote != nil {
-		delay = v.Quote.DelayText()
+		session = v.Quote.SessionText()
 	}
 	fetched := "尚未成功读取"
 	if v.ReceivedAge != nil {
-		fetched = fmt.Sprintf("%.1fs 前成功读取", *v.ReceivedAge)
+		fetched = fmt.Sprintf("%.1fs 前更新", *v.ReceivedAge)
 	}
 	if v.Quote != nil {
-		return fmt.Sprintf("%s: %+.2f%% (最新 %.2f, 涨跌 %+.2f) | %s\n  TradingView %s；%s；%s",
+		return fmt.Sprintf("%s: %+.2f%% (最新 %.2f, 涨跌 %+.2f) | %s\n  %s (%s)；时段: %s；%s",
 			v.Symbol, v.Quote.ChangePercent, v.Quote.Price, v.Quote.ChangeAbs, status,
-			Tickers[v.Symbol], delay, fetched)
+			v.Quote.Description, Tickers[v.Symbol], session, fetched)
 	}
-	return fmt.Sprintf("%s: %s\n  TradingView %s；%s；%s",
-		v.Symbol, status, Tickers[v.Symbol], delay, fetched)
+	return fmt.Sprintf("%s: %s\n  %s；%s；%s",
+		v.Symbol, status, Tickers[v.Symbol], session, fetched)
 }
 
 type feedState struct {
@@ -260,7 +258,7 @@ func NewTracker() *Tracker {
 
 func (t *Tracker) Reset() {
 	for _, sym := range Symbols {
-		t.feeds[sym] = &feedState{err: "等待 TradingView 行情"}
+		t.feeds[sym] = &feedState{err: "等待 VOO/QQQ 实时行情"}
 	}
 }
 

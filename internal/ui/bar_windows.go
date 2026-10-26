@@ -41,8 +41,8 @@ const (
 )
 
 const (
-	compactWidthLogical = 392
-	detailWidthLogical  = 548
+	compactWidthLogical = 418
+	detailWidthLogical  = 576
 	barHeightLogical    = 30
 )
 
@@ -501,22 +501,22 @@ func (u *UI) paint(hwnd uintptr) {
 		quoteOffset = 256
 	}
 
-	// 2. 绘制 TickBar (ES / NQ) 行情段
+	// 2. 绘制 TickBar (VOO / QQQ) 24h 行情段
 	views := snap.Quotes
 	if len(views) == 0 {
 		views = []market.View{
-			{Symbol: "ES", Healthy: false},
-			{Symbol: "NQ", Healthy: false},
+			{Symbol: "VOO", Healthy: false},
+			{Symbol: "QQQ", Healthy: false},
 		}
 	}
 	for i, v := range views {
-		base := quoteOffset + i*148
+		base := quoteOffset + i*160
 		qBrush := u.brushRed
 		if v.Healthy {
 			qBrush = u.brushGreen
 		}
 		u.drawCircle(dc, qBrush, base+4, 11, 8)
-		u.drawTextSegment(dc, v.Symbol, base+17, base+50, colorRef(240, 240, 240))
+		u.drawTextSegment(dc, v.Symbol, base+17, base+62, colorRef(240, 240, 240))
 		text := "--.--%"
 		pctColor := colorRef(170, 170, 170)
 		if v.Quote != nil {
@@ -530,9 +530,9 @@ func (u *UI) paint(hwnd uintptr) {
 				pctColor = colorRef(119, 204, 153)
 			}
 		}
-		u.drawTextSegment(dc, text, base+51, base+136, pctColor)
+		u.drawTextSegment(dc, text, base+63, base+148, pctColor)
 		if i == 0 && len(views) > 1 {
-			u.drawTextSegment(dc, "|", base+137, base+147, colorRef(120, 130, 145))
+			u.drawTextSegment(dc, "|", base+149, base+159, colorRef(120, 130, 145))
 		}
 	}
 }
@@ -563,7 +563,7 @@ func (u *UI) showDiagnostics() {
 		snap = *p
 	}
 	report := DiagnosticsText(u.version, snap)
-	text, title := winapi.UTF16(report), winapi.UTF16("PulseBar — 网络与 TradingView 行情诊断")
+	text, title := winapi.UTF16(report), winapi.UTF16("PulseBar — 网络与 VOO/QQQ 24h 行情诊断")
 	messageBox.Call(u.hwnd, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x40)
 }
 

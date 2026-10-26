@@ -420,6 +420,9 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 				quoteCancel()
 				quoteCancel = nil
 			}
+			if ctx.Err() != nil {
+				return
+			}
 			if qr.err != nil {
 				detail := qr.err.Error()
 				var httpErr market.HTTPError
@@ -439,7 +442,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 					backoff = time.Duration(sec) * time.Second
 				}
 				quoteNextTry = qr.at.Add(backoff)
-				quoteTracker.FailAll(fmt.Sprintf("TradingView 请求/解析失败 (%s)", detail))
+				quoteTracker.FailAll(fmt.Sprintf("VOO/QQQ 行情请求失败 (%s)", detail))
 			} else {
 				quoteFailures = 0
 				quoteNextTry = time.Time{}

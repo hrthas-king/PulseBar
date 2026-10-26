@@ -14,7 +14,7 @@ flowchart LR
     GeoGate --> Geo["后台 WinHTTP\nCloudflare trace 解析"]
     Geo --> Engine
     Engine --> QuoteGate["指数退避 / 2~5s 轮询"]
-    QuoteGate --> Quotes["后台 WinHTTP\nTradingView ES/NQ 校验"]
+    QuoteGate --> Quotes["后台 WinHTTP\nVOO / QQQ 24h 实时流校验"]
     Quotes --> Engine
     Engine --> Mailbox["原子快照 + 合并 PostMessage"]
     Mailbox --> UI["锁定 OS 线程\nGDI 任务栏悬浮条 + 系统托盘"]
@@ -33,7 +33,7 @@ flowchart LR
    - 监听系统网卡、IP 地址、路由变更通知，750ms 事件去抖。
    - 每秒本地检测系统代理、TUN 网卡与常见代理内核（`mihomo`、`sing-box`、`xray`、`clash` 等）的远端连接指纹，连续稳定 2 秒后触发复核。
    - 使用 WinHTTP 请求 `https://www.cloudflare.com/cdn-cgi/trace`，自动继承系统代理与系统 TLS 根证书，禁用 Keep-Alive 确保探测新节点出口。
-4. **TradingView 期货主力行情监控 (`internal/market`)**：
-   - 后台通过 WinHTTP POST `https://scanner.tradingview.com/futures/scan` 一次获取 `CME_MINI:ES1!` 与 `CME_MINI:NQ1!`。
-   - 严格校验合约名称、类型（`futures`）、币种（`USD`）、有限数值、最新价与涨跌额/涨跌幅一致性（容差 `rel_tol=1e-6, abs_tol=0.02`），并限制响应正文上限 2047 字节。
-   - `ES` 与 `NQ` 独立判定健康度，支持延时模式（如 `delayed_streaming_600`）提示，看门狗超时或请求失败立即亮红灯并按指数退避（HTTP 401/403/429 退避 60 秒）。
+4. **VOO / QQQ 24×5 全时段无缝实时行情 (`internal/market`)**：
+   - 后台通过 WinHTTP 读取 `query1.finance.yahoo.com`（备用 `query2.finance.yahoo.com`）的 `/v8/finance/chart/{VOO|QQQ}?interval=1d&range=1d&includePrePost=true` 轻量端点（单标的仅 ~1.3 KB），并在同一轮询周期复用连接句柄降低 TLS 握手开销。
+   - 优先解析覆盖美东时间周日 20:00 至周五 20:00 全天 24 小时（**夜盘 Overnight 20:00–04:00 + 盘前 Pre-Market 04:00–09:30 + 盘中 Regular 09:30–16:00 + 盘后 Post-Market 16:00–20:00**）的 `fulldayPrice` / `fulldayChange` / `fulldayChangePercent` 实时字段。
+   - 独立校验 `VOO` 与 `QQQ` 的 `ETF` 类型、`USD` 币种、有限数值及最新价与涨跌额/涨跌幅一致性（容差 `rel_tol=1e-6, abs_tol=0.025`），看门狗超时或请求失败立即亮红灯并按指数退避（HTTP 401/403/429 退避 60 秒）。

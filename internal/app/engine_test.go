@@ -34,11 +34,11 @@ func TestEngineGeoAndQuotesAggregation(t *testing.T) {
 		},
 		FetchQuotes: func(ctx context.Context) (map[string]market.SymbolResult, error) {
 			quoteCalls.Add(1)
-			es := market.Quote{Symbol: "ES", Price: 5050, ChangePercent: 1.0, ChangeAbs: 50, UpdateMode: "delayed_streaming_600", Description: "E-mini S&P 500"}
-			nq := market.Quote{Symbol: "NQ", Price: 19800, ChangePercent: -1.0, ChangeAbs: -200, UpdateMode: "delayed_streaming_600", Description: "E-mini Nasdaq 100"}
+			voo := market.Quote{Symbol: "VOO", Price: 699.16, ChangePercent: -0.447, ChangeAbs: -3.14, UpdateMode: "24h_fullday_realtime", Session: "夜盘 (Overnight)", Description: "Vanguard S&P 500 ETF"}
+			qqq := market.Quote{Symbol: "QQQ", Price: 703.68, ChangePercent: -0.112, ChangeAbs: -0.79, UpdateMode: "24h_fullday_realtime", Session: "夜盘 (Overnight)", Description: "Invesco QQQ Trust"}
 			return map[string]market.SymbolResult{
-				"ES": {Quote: &es},
-				"NQ": {Quote: &nq},
+				"VOO": {Quote: &voo},
+				"QQQ": {Quote: &qqq},
 			}, nil
 		},
 		NetworkEvents: netEvents,

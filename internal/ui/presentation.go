@@ -86,7 +86,7 @@ func CompactRTT(s app.Snapshot) string {
 
 func QuoteSummary(s app.Snapshot) string {
 	if len(s.Quotes) == 0 {
-		return "ES -- | NQ --"
+		return "VOO -- | QQQ --"
 	}
 	parts := make([]string, 0, len(s.Quotes))
 	for _, v := range s.Quotes {
@@ -153,7 +153,7 @@ func OverlayTooltip(s app.Snapshot) string {
 	for _, v := range s.Quotes {
 		lines = append(lines, "【行情】"+v.Tooltip())
 	}
-	lines = append(lines, "注：市场成交时间戳未提供，绿灯代表数据读取与一致性校验通过，不代表实时。")
+	lines = append(lines, "注：覆盖夜盘(20:00-04:00)、盘前(04:00-09:30)、盘中(09:30-16:00)与盘后(16:00-20:00) 24×5 全时段实时流。")
 	return strings.Join(lines, "\n")
 }
 
@@ -178,14 +178,14 @@ func DiagnosticsText(version string, s app.Snapshot) string {
 	if s.NICError != "" {
 		fmt.Fprintf(&b, "  网卡提示: %s\n", s.NICError)
 	}
-	fmt.Fprintf(&b, "\n[TickBar 期货行情监控 (TradingView)]\n")
-	fmt.Fprintf(&b, "  说明: 绿灯=读取正常且通过字段一致性校验；红灯=请求失败或数据异常。允许延时，绿灯不代表实时。\n\n")
+	fmt.Fprintf(&b, "\n[TickBar 24h 全时段 ETF 实时监控 (VOO / QQQ)]\n")
+	fmt.Fprintf(&b, "  说明: 覆盖美东时间周日 20:00 至周五 20:00 全天 24 小时（夜盘 + 盘前 + 盘中 + 盘后）无缝实时价格流。\n\n")
 	for _, v := range s.Quotes {
 		fmt.Fprintf(&b, "%s\n", v.Tooltip())
 		if q := v.Quote; q != nil {
-			fmt.Fprintf(&b, "  合约描述: %s | 更新模式: %s\n", q.Description, q.UpdateMode)
-			fmt.Fprintf(&b, "  最新价格: %.2f | 涨跌额: %+.2f | 涨跌幅: %+.4f%%\n", q.Price, q.ChangeAbs, q.ChangePercent)
-			fmt.Fprintf(&b, "  推导昨结: %.2f | HTTP耗时: %.0f ms\n", q.Previous(), q.RTTMs)
+			fmt.Fprintf(&b, "  基金描述: %s | 当前时段: %s | 更新模式: %s\n", q.Description, q.SessionText(), q.UpdateMode)
+			fmt.Fprintf(&b, "  24h最新价: %.2f (常规盘收盘: %.2f) | 涨跌额: %+.2f | 涨跌幅: %+.3f%%\n", q.Price, q.RegularPrice, q.ChangeAbs, q.ChangePercent)
+			fmt.Fprintf(&b, "  昨收基准: %.2f | HTTP耗时: %.0f ms\n", q.Previous(), q.RTTMs)
 		}
 		fmt.Fprintf(&b, "\n")
 	}

@@ -12,8 +12,8 @@ import (
 )
 
 func TestTooltipsAndFormatting(t *testing.T) {
-	es := market.Quote{Symbol: "ES", Price: 5050, ChangePercent: 1.0, ChangeAbs: 50, UpdateMode: "delayed_streaming_600", Description: "E-mini S&P 500"}
-	nq := market.Quote{Symbol: "NQ", Price: 19800, ChangePercent: -0.5, ChangeAbs: -100, UpdateMode: "streaming", Description: "E-mini Nasdaq 100"}
+	voo := market.Quote{Symbol: "VOO", Price: 699.16, ChangePercent: -0.45, ChangeAbs: -3.14, UpdateMode: "24h_fullday_realtime", Session: "夜盘 (Overnight)", Description: "Vanguard S&P 500 ETF"}
+	qqq := market.Quote{Symbol: "QQQ", Price: 703.68, ChangePercent: -0.11, ChangeAbs: -0.79, UpdateMode: "24h_fullday_realtime", Session: "夜盘 (Overnight)", Description: "Invesco QQQ Trust"}
 	age := 1.2
 	snap := app.Snapshot{
 		Status: monitor.Online,
@@ -22,23 +22,23 @@ func TestTooltipsAndFormatting(t *testing.T) {
 		Probe:  monitor.Probe{Success: true, Uplink: monitor.UplinkConfirmed, RTT: 18 * time.Millisecond},
 		NIC:    "WLAN",
 		Quotes: []market.View{
-			{Symbol: "ES", Quote: &es, Healthy: true, ReceivedAge: &age},
-			{Symbol: "NQ", Quote: &nq, Healthy: true, ReceivedAge: &age},
+			{Symbol: "VOO", Quote: &voo, Healthy: true, ReceivedAge: &age},
+			{Symbol: "QQQ", Quote: &qqq, Healthy: true, ReceivedAge: &age},
 		},
 	}
 
 	trayTip := TrayTooltip(snap)
-	if !strings.Contains(trayTip, "PulseBar [SG] 正常") || !strings.Contains(trayTip, "ES +1.00%") || !strings.Contains(trayTip, "NQ -0.50%") {
+	if !strings.Contains(trayTip, "PulseBar [SG] 正常") || !strings.Contains(trayTip, "VOO -0.45%") || !strings.Contains(trayTip, "QQQ -0.11%") {
 		t.Fatalf("unexpected tray tooltip:\n%s", trayTip)
 	}
 
 	overlayTip := OverlayTooltip(snap)
-	if !strings.Contains(overlayTip, "198.51.100.99") || !strings.Contains(overlayTip, "CME_MINI:ES1!") || !strings.Contains(overlayTip, "CME_MINI:NQ1!") {
+	if !strings.Contains(overlayTip, "198.51.100.99") || !strings.Contains(overlayTip, "NYSEArca:VOO") || !strings.Contains(overlayTip, "NASDAQ:QQQ") {
 		t.Fatalf("unexpected overlay tooltip:\n%s", overlayTip)
 	}
 
-	diag := DiagnosticsText("v0.1.0", snap)
-	if !strings.Contains(diag, "GeoPulse") || !strings.Contains(diag, "TickBar") {
+	diag := DiagnosticsText("v0.2.0", snap)
+	if !strings.Contains(diag, "GeoPulse") || !strings.Contains(diag, "VOO") || !strings.Contains(diag, "QQQ") {
 		t.Fatalf("unexpected diagnostics text:\n%s", diag)
 	}
 }

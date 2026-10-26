@@ -8,7 +8,12 @@ import (
 	"path/filepath"
 )
 
-const DefaultMarketGroup = "voo_qqq"
+const (
+	DefaultMarketGroup    = "voo_qqq"
+	DefaultUIScalePercent = 100
+)
+
+var UIScalePresets = []int{75, 85, 90, 100, 115, 130}
 
 var validMarketGroups = map[string]bool{
 	"voo_qqq":      true,
@@ -26,6 +31,7 @@ type Config struct {
 	Locked          bool   `json:"locked"`
 	UpIsRed         bool   `json:"up_is_red"`
 	MarketGroup     string `json:"market_group"`
+	UIScalePercent  int    `json:"ui_scale_percent"`
 	Placement       string `json:"placement"`
 	X               *int   `json:"x,omitempty"`
 	Y               *int   `json:"y,omitempty"`
@@ -39,6 +45,15 @@ func ValidMarketGroup(group string) bool {
 	return validMarketGroups[group]
 }
 
+func ValidUIScalePercent(pct int) bool {
+	for _, p := range UIScalePresets {
+		if p == pct {
+			return true
+		}
+	}
+	return false
+}
+
 func Default() Config {
 	return Config{
 		IntervalSeconds: 2,
@@ -46,6 +61,7 @@ func Default() Config {
 		Locked:          false,
 		UpIsRed:         false,
 		MarketGroup:     DefaultMarketGroup,
+		UIScalePercent:  DefaultUIScalePercent,
 		Placement:       "left",
 	}
 }
@@ -81,6 +97,9 @@ func LoadFrom(path string) Config {
 	if ValidMarketGroup(saved.MarketGroup) {
 		c.MarketGroup = saved.MarketGroup
 	}
+	if ValidUIScalePercent(saved.UIScalePercent) {
+		c.UIScalePercent = saved.UIScalePercent
+	}
 	c.ShowNetDetail = saved.ShowNetDetail
 	c.Locked = saved.Locked
 	c.UpIsRed = saved.UpIsRed
@@ -110,6 +129,11 @@ func SaveTo(path string, c Config) error {
 		c.MarketGroup = DefaultMarketGroup
 	} else if !ValidMarketGroup(c.MarketGroup) {
 		return fmt.Errorf("无效的行情标的分组: %s", c.MarketGroup)
+	}
+	if c.UIScalePercent == 0 {
+		c.UIScalePercent = DefaultUIScalePercent
+	} else if !ValidUIScalePercent(c.UIScalePercent) {
+		return fmt.Errorf("无效的显示缩放比例: %d%%", c.UIScalePercent)
 	}
 	if c.Placement != "manual" || c.X == nil || c.Y == nil {
 		c.Placement = "left"

@@ -34,6 +34,12 @@ const (
 	ActionGroupHKIndices
 	ActionGroupAsiaIndices
 	ActionGroupEUIndices
+	ActionScale75
+	ActionScale85
+	ActionScale90
+	ActionScale100
+	ActionScale115
+	ActionScale130
 	ActionInterval1
 	ActionInterval2
 	ActionInterval5
@@ -53,15 +59,35 @@ func GroupForAction(act Action) (string, bool) {
 	return market.Groups[idx].ID, true
 }
 
+func ScaleForAction(act Action) (int, bool) {
+	if act < ActionScale75 || act > ActionScale130 {
+		return 0, false
+	}
+	idx := int(act - ActionScale75)
+	if idx < 0 || idx >= len(config.UIScalePresets) {
+		return 0, false
+	}
+	return config.UIScalePresets[idx], true
+}
+
+var scaleMenuLabels = map[int]string{
+	75:  "75% (迷你 Mini)",
+	85:  "85% (紧凑 Small)",
+	90:  "90% (适中 Medium)",
+	100: "100% (标准 Default)",
+	115: "115% (放大 Large)",
+	130: "130% (特大 Extra Large)",
+}
+
 const (
 	wmTray   = 0x8001
 	wmUpdate = 0x8002
 )
 
 const (
-	slotWidthLogical    = 228
-	compactWidthLogical = 98 + 2*slotWidthLogical
-	detailWidthLogical  = 256 + 2*slotWidthLogical
+	slotWidthLogical    = 176
+	compactWidthLogical = 86 + 2*slotWidthLogical
+	detailWidthLogical  = 196 + 2*slotWidthLogical
 	barHeightLogical    = 30
 )
 
@@ -123,10 +149,12 @@ var (
 	setBkMode            = gdi32.NewProc("SetBkMode")
 	ellipse              = gdi32.NewProc("Ellipse")
 	setPixel             = gdi32.NewProc("SetPixel")
+	getTextExtentPoint32 = gdi32.NewProc("GetTextExtentPoint32W")
 	initCommonControlsEx = comctl32.NewProc("InitCommonControlsEx")
 )
 
 type point struct{ X, Y int32 }
+type textSize struct{ CX, CY int32 }
 type rect struct{ Left, Top, Right, Bottom int32 }
 
 type message struct {
@@ -208,6 +236,7 @@ type UI struct {
 	tool           toolInfo
 	tooltipBuf     [2048]uint16
 	instance       uintptr
+	dpiScale       float64
 	scale          float64
 	width, height  int32
 	bgBrush        uintptr
@@ -217,7 +246,6 @@ type UI struct {
 	brushRed       uintptr
 	brushGray      uintptr
 	font           uintptr
-	symbolFont     uintptr
 	data           notifyIcon
 	icons          map[string]uintptr
 	iconCountry    string
@@ -237,13 +265,37 @@ type UI struct {
 }
 
 func NewUI(version string, cfg config.Config) *UI {
-	return &UI{
-		version: version,
-		cfg:     cfg,
-		scale:   1.0,
-		icons:   make(map[string]uintptr),
-		Actions: make(chan Action, 16),
+	if !config.ValidUIScalePercent(cfg.UIScalePercent) {
+		cfg.UIScalePercent = config.DefaultUIScalePercent
 	}
+	u := &UI{
+		version:  version,
+		cfg:      cfg,
+		dpiScale: 1.0,
+		scale:    float64(cfg.UIScalePercent) / 100.0,
+		icons:    make(map[string]uintptr),
+		Actions:  make(chan Action, 16),
+	}
+	return u
+}
+
+func (u *UI) recalcScale() {
+	pct := u.cfg.UIScalePercent
+	if !config.ValidUIScalePercent(pct) {
+		pct = config.DefaultUIScalePercent
+	}
+	if u.dpiScale <= 0 {
+		u.dpiScale = 1.0
+	}
+	u.scale = u.dpiScale * float64(pct) / 100.0
+}
+
+func (u *UI) rebuildFonts() {
+	if u.font != 0 {
+		deleteObject.Call(u.font)
+	}
+	fontName := winapi.UTF16("Segoe UI")
+	u.font, _, _ = createFont.Call(uintptr(int(-u.px(14))), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 3, 0, uintptr(unsafe.Pointer(fontName)))
 }
 
 func (u *UI) SetAutostart(enabled bool) { u.startup.Store(enabled) }
@@ -436,46 +488,39 @@ func (u *UI) update(s app.Snapshot) error {
 	return nil
 }
 
-func (u *UI) drawTextSegment(dc uintptr, text string, leftLogical, rightLogical int, color uintptr) {
+func (u *UI) drawFlowText(dc uintptr, text string, leftPx int32, color uintptr) int32 {
+	if text == "" {
+		return leftPx
+	}
 	setTextColor.Call(dc, color)
-	rc := rect{Left: u.px(leftLogical), Top: 0, Right: u.px(rightLogical), Bottom: u.height}
+	enc := utf16.Encode([]rune(text))
+	var sz textSize
+	getTextExtentPoint32.Call(dc, uintptr(unsafe.Pointer(&enc[0])), uintptr(len(enc)), uintptr(unsafe.Pointer(&sz)))
+	rightPx := leftPx + sz.CX + max(2, u.px(2))
+	rc := rect{Left: leftPx, Top: 0, Right: rightPx, Bottom: u.height}
 	ptr := winapi.UTF16(text)
 	drawText.Call(dc, uintptr(unsafe.Pointer(ptr)), ^uintptr(0), uintptr(unsafe.Pointer(&rc)), 0x20|0x4|0x8000)
 	runtime.KeepAlive(ptr)
+	runtime.KeepAlive(enc)
+	return leftPx + sz.CX
 }
 
-func (u *UI) drawTextCentered(dc uintptr, text string, leftLogical, rightLogical int, color uintptr) {
-	setTextColor.Call(dc, color)
-	rc := rect{Left: u.px(leftLogical), Top: 0, Right: u.px(rightLogical), Bottom: u.height}
-	ptr := winapi.UTF16(text)
-	drawText.Call(dc, uintptr(unsafe.Pointer(ptr)), ^uintptr(0), uintptr(unsafe.Pointer(&rc)), 0x20|0x4|0x1|0x8000)
-	runtime.KeepAlive(ptr)
-}
-
-func (u *UI) drawSymbolCentered(dc uintptr, text string, leftLogical, rightLogical int, color uintptr) {
-	if u.symbolFont != 0 {
-		old, _, _ := selectObject.Call(dc, u.symbolFont)
-		defer selectObject.Call(dc, old)
-	}
-	u.drawTextCentered(dc, text, leftLogical, rightLogical, color)
-}
-
-func (u *UI) drawCircle(dc uintptr, brush uintptr, leftLogical, topLogical, sizeLogical int) {
+func (u *UI) drawCirclePx(dc uintptr, brush uintptr, centerXPx, centerYPx, radiusPx int32) {
 	old, _, _ := selectObject.Call(dc, brush)
 	ellipse.Call(
 		dc,
-		uintptr(u.px(leftLogical)),
-		uintptr(u.px(topLogical)),
-		uintptr(u.px(leftLogical+sizeLogical)),
-		uintptr(u.px(topLogical+sizeLogical)),
+		uintptr(centerXPx-radiusPx),
+		uintptr(centerYPx-radiusPx),
+		uintptr(centerXPx+radiusPx),
+		uintptr(centerYPx+radiusPx),
 	)
 	selectObject.Call(dc, old)
 }
 
-// drawPurpleMoon 使用 GDI 像素几何在 (centerXLogical, centerYLogical) 绘制无字体依赖的亮紫色实心月牙。
-func (u *UI) drawPurpleMoon(dc uintptr, centerXLogical, centerYLogical int) {
-	cx := float64(u.px(centerXLogical))
-	cy := float64(u.px(centerYLogical))
+// drawPurpleMoonPx 使用 GDI 像素几何在像素坐标 (centerXPx, centerYPx) 绘制无字体依赖的亮紫色实心月牙。
+func (u *UI) drawPurpleMoonPx(dc uintptr, centerXPx, centerYPx int32) {
+	cx := float64(centerXPx)
+	cy := float64(centerYPx)
 	s := u.scale
 	outerR := 5.2 * s
 	outerR2 := outerR * outerR
@@ -494,16 +539,14 @@ func (u *UI) drawPurpleMoon(dc uintptr, centerXLogical, centerYLogical int) {
 			cdy := y - cutY
 			d2 := cdx*cdx + cdy*cdy
 			if d1 <= outerR2 && d2 > cutR2 {
-				setPixel.Call(dc, uintptr(int32(cx)+dx), uintptr(int32(cy)+dy), purple)
+				setPixel.Call(dc, uintptr(centerXPx+dx), uintptr(centerYPx+dy), purple)
 			}
 		}
 	}
 }
 
-// drawYellowSun 使用 GDI 像素几何在 (centerXLogical, centerYLogical) 绘制无字体依赖的明黄色实心太阳与八向光芒。
-func (u *UI) drawYellowSun(dc uintptr, centerXLogical, centerYLogical int) {
-	cx := float64(u.px(centerXLogical))
-	cy := float64(u.px(centerYLogical))
+// drawYellowSunPx 使用 GDI 像素几何在像素坐标 (centerXPx, centerYPx) 绘制无字体依赖的明黄色实心太阳与八向光芒。
+func (u *UI) drawYellowSunPx(dc uintptr, centerXPx, centerYPx int32) {
 	s := u.scale
 	yellow := colorRef(255, 214, 10)
 	span := int32(math.Ceil(6.2*s + 1))
@@ -521,7 +564,7 @@ func (u *UI) drawYellowSun(dc uintptr, centerXLogical, centerYLogical int) {
 				}
 			}
 			if hit {
-				setPixel.Call(dc, uintptr(int32(cx)+dx), uintptr(int32(cy)+dy), yellow)
+				setPixel.Call(dc, uintptr(centerXPx+dx), uintptr(centerYPx+dy), yellow)
 			}
 		}
 	}
@@ -549,7 +592,11 @@ func (u *UI) paint(hwnd uintptr) {
 		snap = app.Snapshot{Status: monitor.Unknown}
 	}
 
-	// 1. 绘制 GeoPulse 段
+	centerY := u.height / 2
+	dotRadius := max(3, u.px(4))
+	curX := u.px(5)
+
+	// 1. 流式紧凑绘制 GeoPulse 段（消除网速与 RTT 之间的多余空白）
 	netBrush := u.brushGray
 	switch snap.Status {
 	case monitor.Online:
@@ -559,10 +606,10 @@ func (u *UI) paint(hwnd uintptr) {
 	case monitor.Offline:
 		netBrush = u.brushRed
 	}
-	u.drawCircle(dc, netBrush, 6, 11, 8)
-	u.drawTextSegment(dc, Country(snap), 19, 48, colorRef(240, 246, 255))
+	u.drawCirclePx(dc, netBrush, curX+dotRadius, centerY, dotRadius)
+	curX += dotRadius*2 + u.px(5)
+	curX = u.drawFlowText(dc, Country(snap), curX, colorRef(240, 246, 255)) + u.px(6)
 
-	quoteOffset := 98
 	if !u.cfg.ShowNetDetail {
 		upColor := colorRef(100, 116, 139)
 		if snap.Rates.Up > 0 {
@@ -572,9 +619,9 @@ func (u *UI) paint(hwnd uintptr) {
 		if snap.Rates.Down > 0 {
 			downColor = colorRef(56, 189, 248)
 		}
-		u.drawTextSegment(dc, "↑", 50, 66, upColor)
-		u.drawTextSegment(dc, "↓", 66, 84, downColor)
-		u.drawTextSegment(dc, "|", 86, 96, colorRef(120, 130, 145))
+		curX = u.drawFlowText(dc, "↑", curX, upColor) + u.px(1)
+		curX = u.drawFlowText(dc, "↓", curX, downColor) + u.px(6)
+		curX = u.drawFlowText(dc, "|", curX, colorRef(120, 130, 145)) + u.px(7)
 	} else {
 		upStr, downStr := "--", "--"
 		if snap.Rates.Valid {
@@ -584,17 +631,16 @@ func (u *UI) paint(hwnd uintptr) {
 		if snap.Rates.Up > 0 || snap.Rates.Down > 0 {
 			rateColor = colorRef(125, 211, 252)
 		}
-		u.drawTextSegment(dc, fmt.Sprintf("↑%s ↓%s", upStr, downStr), 50, 184, rateColor)
+		curX = u.drawFlowText(dc, fmt.Sprintf("↑%s ↓%s", upStr, downStr), curX, rateColor) + u.px(7)
 		rttColor := colorRef(148, 163, 184)
 		if snap.Probe.Success {
 			rttColor = colorRef(167, 243, 208)
 		}
-		u.drawTextSegment(dc, CompactRTT(snap), 186, 242, rttColor)
-		u.drawTextSegment(dc, "|", 244, 254, colorRef(120, 130, 145))
-		quoteOffset = 256
+		curX = u.drawFlowText(dc, CompactRTT(snap), curX, rttColor) + u.px(6)
+		curX = u.drawFlowText(dc, "|", curX, colorRef(120, 130, 145)) + u.px(7)
 	}
 
-	// 2. 绘制多市场行情段（五态时段信号 + 异常感叹号 + 简洁别名 + 自适应价格与涨跌幅）
+	// 2. 流式紧凑绘制多市场行情段（五态时段信号 + 异常感叹号 + 简洁别名 + 自适应价格与涨跌幅）
 	views := snap.Quotes
 	if len(views) == 0 {
 		g := market.GroupByID(u.cfg.MarketGroup)
@@ -608,32 +654,26 @@ func (u *UI) paint(hwnd uintptr) {
 		}
 	}
 	for i, v := range views {
-		base := quoteOffset + i*slotWidthLogical
+		iconCenterX := curX + dotRadius + u.px(1)
 		switch v.EffectiveState() {
 		case market.StatePreMarket:
-			u.drawYellowSun(dc, base+10, 15)
+			u.drawYellowSunPx(dc, iconCenterX, centerY)
 		case market.StateOvernight:
-			u.drawPurpleMoon(dc, base+10, 15)
+			u.drawPurpleMoonPx(dc, iconCenterX, centerY)
 		case market.StateRegular:
-			u.drawCircle(dc, u.brushGreen, base+6, 11, 8)
+			u.drawCirclePx(dc, u.brushGreen, iconCenterX, centerY, dotRadius)
 		case market.StatePostMarket:
-			u.drawCircle(dc, u.brushBlue, base+6, 11, 8)
+			u.drawCirclePx(dc, u.brushBlue, iconCenterX, centerY, dotRadius)
 		default:
-			u.drawCircle(dc, u.brushGray, base+6, 11, 8)
+			u.drawCirclePx(dc, u.brushGray, iconCenterX, centerY, dotRadius)
 		}
+		curX += dotRadius*2 + u.px(6)
 
-		aliasLeft := base + 19
 		if !v.Healthy {
-			u.drawTextSegment(dc, "!", base+17, base+25, colorRef(255, 82, 82))
-			aliasLeft = base + 25
+			curX = u.drawFlowText(dc, "!", curX, colorRef(255, 82, 82)) + u.px(3)
 		}
 
-		alias := v.DisplayName()
-		aliasW := 42
-		if len(alias) >= 5 {
-			aliasW = 48
-		}
-		u.drawTextSegment(dc, alias, aliasLeft, aliasLeft+aliasW, colorRef(240, 240, 240))
+		curX = u.drawFlowText(dc, v.DisplayName(), curX, colorRef(240, 240, 240)) + u.px(5)
 
 		text := "---.-- --.--%"
 		pctColor := colorRef(170, 170, 170)
@@ -648,10 +688,21 @@ func (u *UI) paint(hwnd uintptr) {
 				pctColor = colorRef(119, 204, 153)
 			}
 		}
-		u.drawTextSegment(dc, text, aliasLeft+aliasW+2, base+slotWidthLogical-12, pctColor)
+		curX = u.drawFlowText(dc, text, curX, pctColor)
 		if i == 0 && len(views) > 1 {
-			u.drawTextSegment(dc, "|", base+slotWidthLogical-11, base+slotWidthLogical-1, colorRef(120, 130, 145))
+			curX += u.px(7)
+			curX = u.drawFlowText(dc, "|", curX, colorRef(120, 130, 145)) + u.px(7)
 		}
+	}
+
+	neededW := curX + u.px(6)
+	diff := neededW - u.width
+	if diff < 0 {
+		diff = -diff
+	}
+	if neededW > u.width || diff > u.px(8) {
+		u.width = neededW
+		setWindowPos.Call(hwnd, ^uintptr(0), 0, 0, uintptr(u.width), uintptr(u.height), 0x0002|0x0010)
 	}
 }
 
@@ -744,25 +795,69 @@ func (u *UI) menu() {
 	if !market.ValidGroup(currentGroup) {
 		currentGroup = market.DefaultGroup
 	}
+	activeIdx := 0
 	for i, g := range market.Groups {
-		flags := uintptr(0)
 		if g.ID == currentGroup {
-			flags = 8
+			activeIdx = i
+			break
 		}
-		add(Action(uint32(ActionGroupVOOQQQ)+uint32(i)), g.MenuLabel, flags)
+	}
+	// 第一行直接显示当前选中的标的对（如：✔ 标普 / 纳指 (VOO / QQQ)）
+	add(Action(uint32(ActionGroupVOOQQQ)+uint32(activeIdx)), market.Groups[activeIdx].MenuLabel, 8)
+	// 第二行显示可折叠的 More 子菜单，点开后展示其余所有指数/标的
+	moreMenu, _, _ := createMenu.Call()
+	if moreMenu != 0 {
+		for i, g := range market.Groups {
+			if i == activeIdx {
+				continue
+			}
+			p := winapi.UTF16(g.MenuLabel)
+			appendMenu.Call(moreMenu, 0, uintptr(uint32(ActionGroupVOOQQQ)+uint32(i)), uintptr(unsafe.Pointer(p)))
+		}
+		moreTitle := winapi.UTF16("More (更多行情标的)")
+		appendMenu.Call(menu, 0x10, moreMenu, uintptr(unsafe.Pointer(moreTitle)))
 	}
 
 	add(0, "", 0x800)
+	// 显示大小调节子菜单 (75% ~ 130%)
+	scalePct := u.cfg.UIScalePercent
+	if !config.ValidUIScalePercent(scalePct) {
+		scalePct = config.DefaultUIScalePercent
+	}
+	scaleMenu, _, _ := createMenu.Call()
+	if scaleMenu != 0 {
+		for i, pct := range config.UIScalePresets {
+			flags := uintptr(0)
+			if pct == scalePct {
+				flags = 8
+			}
+			label := scaleMenuLabels[pct]
+			if label == "" {
+				label = fmt.Sprintf("%d%%", pct)
+			}
+			p := winapi.UTF16(label)
+			appendMenu.Call(scaleMenu, flags, uintptr(uint32(ActionScale75)+uint32(i)), uintptr(unsafe.Pointer(p)))
+		}
+		scaleTitle := winapi.UTF16(fmt.Sprintf("显示大小 (当前: %d%%)", scalePct))
+		appendMenu.Call(menu, 0x10, scaleMenu, uintptr(unsafe.Pointer(scaleTitle)))
+	}
+
 	interval := u.cfg.IntervalSeconds
 	if s != nil && app.ValidInterval(s.IntervalSeconds) {
 		interval = s.IntervalSeconds
 	}
-	for i, n := range []int{1, 2, 5} {
-		flags := uintptr(0)
-		if interval == n {
-			flags = 8
+	intervalMenu, _, _ := createMenu.Call()
+	if intervalMenu != 0 {
+		for i, n := range []int{1, 2, 5} {
+			flags := uintptr(0)
+			if interval == n {
+				flags = 8
+			}
+			p := winapi.UTF16(fmt.Sprintf("%ds（心跳固定 1s）", n))
+			appendMenu.Call(intervalMenu, flags, uintptr(uint32(ActionInterval1)+uint32(i)), uintptr(unsafe.Pointer(p)))
 		}
-		add(Action(uint32(ActionInterval1)+uint32(i)), fmt.Sprintf("检测/显示间隔 %ds（心跳固定 1s）", n), flags)
+		intTitle := winapi.UTF16(fmt.Sprintf("检测/显示间隔 (当前: %ds)", interval))
+		appendMenu.Call(menu, 0x10, intervalMenu, uintptr(unsafe.Pointer(intTitle)))
 	}
 	add(0, "", 0x800)
 	add(ActionDiagnostics, "查看详细诊断信息", 0)
@@ -810,6 +905,22 @@ func (u *UI) handleAction(act Action) {
 	case ActionDiagnostics:
 		u.showDiagnostics()
 	default:
+		if pct, ok := ScaleForAction(act); ok {
+			u.cfg.UIScalePercent = pct
+			_ = config.Save(u.cfg)
+			u.recalcScale()
+			u.updateDimensions()
+			u.rebuildFonts()
+			x, y := u.initialPosition()
+			if u.cfg.Placement == "manual" {
+				var rc rect
+				getWindowRect.Call(u.hwnd, uintptr(unsafe.Pointer(&rc)))
+				x, y = rc.Left, rc.Top
+			}
+			setWindowPos.Call(u.hwnd, ^uintptr(0), uintptr(x), uintptr(y), uintptr(u.width), uintptr(u.height), 0x10)
+			invalidateRect.Call(u.hwnd, 0, 0)
+			return
+		}
 		if grp, ok := GroupForAction(act); ok {
 			u.cfg.MarketGroup = grp
 			_ = config.Save(u.cfg)
@@ -939,18 +1050,10 @@ func (u *UI) windowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintpt
 	case 0x02E0: // WM_DPICHANGED
 		dpi := uint32(wparam & 0xffff)
 		if dpi > 0 {
-			u.scale = float64(dpi) / 96.0
+			u.dpiScale = float64(dpi) / 96.0
+			u.recalcScale()
 			u.updateDimensions()
-			if u.font != 0 {
-				deleteObject.Call(u.font)
-			}
-			if u.symbolFont != 0 {
-				deleteObject.Call(u.symbolFont)
-			}
-			fontName := winapi.UTF16("Segoe UI")
-			symFontName := winapi.UTF16("Segoe UI Symbol")
-			u.font, _, _ = createFont.Call(uintptr(int(-u.px(14))), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 3, 0, uintptr(unsafe.Pointer(fontName)))
-			u.symbolFont, _, _ = createFont.Call(uintptr(int(-u.px(15))), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 4, 0, uintptr(unsafe.Pointer(symFontName)))
+			u.rebuildFonts()
 			if lparam != 0 {
 				var suggested rect
 				rtlMoveMemory.Call(uintptr(unsafe.Pointer(&suggested)), lparam, unsafe.Sizeof(suggested))
@@ -979,9 +1082,10 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	}
 	if getDpiForSystem.Find() == nil {
 		if dpi, _, _ := getDpiForSystem.Call(); dpi > 0 {
-			u.scale = float64(dpi) / 96.0
+			u.dpiScale = float64(dpi) / 96.0
 		}
 	}
+	u.recalcScale()
 	u.updateDimensions()
 
 	u.instance, _, _ = getModule.Call(0)
@@ -991,13 +1095,10 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	u.brushYellow, _, _ = createSolidBrush.Call(colorRef(245, 158, 11))
 	u.brushRed, _, _ = createSolidBrush.Call(colorRef(255, 23, 68))
 	u.brushGray, _, _ = createSolidBrush.Call(colorRef(148, 163, 184))
-	fontName := winapi.UTF16("Segoe UI")
-	symFontName := winapi.UTF16("Segoe UI Symbol")
-	u.font, _, _ = createFont.Call(uintptr(int(-u.px(14))), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 3, 0, uintptr(unsafe.Pointer(fontName)))
-	u.symbolFont, _, _ = createFont.Call(uintptr(int(-u.px(15))), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 4, 0, uintptr(unsafe.Pointer(symFontName)))
+	u.rebuildFonts()
 
 	defer func() {
-		for _, obj := range []uintptr{u.font, u.symbolFont, u.bgBrush, u.brushGreen, u.brushBlue, u.brushYellow, u.brushRed, u.brushGray} {
+		for _, obj := range []uintptr{u.font, u.bgBrush, u.brushGreen, u.brushBlue, u.brushYellow, u.brushRed, u.brushGray} {
 			if obj != 0 {
 				deleteObject.Call(obj)
 			}

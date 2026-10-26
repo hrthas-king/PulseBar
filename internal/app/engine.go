@@ -221,6 +221,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 	var quoteFailures int
 	var quoteNextTry time.Time
 	var quoteCancel context.CancelFunc
+	var lastHTTPSuccessAt time.Time
 
 	defer func() {
 		if refreshTimer != nil {
@@ -318,9 +319,22 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 			if r.epoch != generation.Load() {
 				continue
 			}
+			probeVal := r.value
+			// 层 2：若探针偶发超时，但当前网卡有真实下行流量（>512B/s）或最近 4 秒内 HTTPS 请求刚成功返回，视为旁路在线
+			if !probeVal.Success && probeVal.Uplink != monitor.UplinkLocalError {
+				activeDown := snapshot.Rates.Valid && snapshot.Rates.Down >= 512
+				recentHTTP := !lastHTTPSuccessAt.IsZero() && time.Since(lastHTTPSuccessAt) <= 4*time.Second
+				if activeDown || recentHTTP {
+					probeVal.Success = true
+					probeVal.Uplink = monitor.UplinkConfirmed
+					if probeVal.RTT <= 0 && snapshot.Probe.RTT > 0 {
+						probeVal.RTT = snapshot.Probe.RTT
+					}
+				}
+			}
 			previous := tracker.Status
-			recovered := tracker.Apply(r.value)
-			snapshot.Probe = r.value
+			recovered := tracker.Apply(probeVal)
+			snapshot.Probe = probeVal
 			if recovered && previous == monitor.Offline {
 				requestGeo()
 				quoteNextTry = time.Time{}
@@ -331,19 +345,15 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 				armGeo()
 			}
 		case <-e.deps.NetworkEvents:
-			generation.Add(1)
-			geoGeneration++
-			tracker.Reset()
-			sampler.Reset()
-			snapshot.Geo = ipinfo.Info{}
-			snapshot.GeoError = ""
-			snapshot.Rates = monitor.Rates{}
-			snapshot.Probe = monitor.Probe{Uplink: monitor.UplinkUnknown}
-			if fetchCancel != nil {
-				fetchCancel()
+			// 层 4：收到系统路由或 IPv6 临时地址变动通知时，若当前已在线，平滑保持当前状态与国家码，仅后台静默复核出口
+			if tracker.Status != monitor.Online {
+				generation.Add(1)
+				tracker.Reset()
+				sampler.Reset()
+				snapshot.Rates = monitor.Rates{}
+				snapshot.Probe = monitor.Probe{Uplink: monitor.UplinkUnknown}
 			}
 			debounceUntil = time.Now().Add(EventDebounce)
-			urgent = true
 			requestGeo()
 			quoteNextTry = time.Time{}
 			triggerQuoteFetch(true)
@@ -434,6 +444,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 				if r.err != nil {
 					snapshot.GeoError = r.err.Error()
 				} else {
+					lastHTTPSuccessAt = time.Now()
 					hadErr := snapshot.GeoError != ""
 					snapshot.Geo = r.value
 					snapshot.GeoError = ""
@@ -474,6 +485,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 				quoteNextTry = qr.at.Add(backoff)
 				quoteTracker.FailAll(fmt.Sprintf("行情请求失败 (%s)", detail))
 			} else {
+				lastHTTPSuccessAt = qr.at
 				quoteFailures = 0
 				quoteNextTry = time.Time{}
 				quoteTracker.ApplyBatch(qr.batch, qr.at)

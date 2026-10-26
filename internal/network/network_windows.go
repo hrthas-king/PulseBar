@@ -6,6 +6,7 @@ package network
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 	"net/netip"
 	"runtime"
 	"syscall"
@@ -114,16 +115,44 @@ func (p *Pinger) Close() {
 }
 
 func (p *Pinger) Ping(target string) monitor.Probe {
-	result := monitor.Probe{Target: target, Uplink: monitor.UplinkUnknown}
 	defer func() { runtime.KeepAlive(p) }()
+	if _, err := ReadCounters(target); err != nil {
+		return monitor.Probe{
+			Target: target,
+			Uplink: monitor.UplinkLocalError,
+			Detail: err.Error(),
+			At:     time.Now(),
+		}
+	}
+
+	// 1. 优先尝试主目标 ICMP Echo
+	res := p.pingICMP(target, 550)
+	if res.Success {
+		return res
+	}
+
+	// 2. 同周期立即对备用目标发起二次 ICMP 复核，避免 TUN 偶发丢弃单包导致跨秒状态闪烁
+	alt := "8.8.8.8"
+	if target == "8.8.8.8" {
+		alt = "1.1.1.1"
+	}
+	resAlt := p.pingICMP(alt, 550)
+	if resAlt.Success {
+		return resAlt
+	}
+
+	// 3. 若 TUN/代理节点禁 Ping 或丢弃三层 ICMP，发起轻量 TCP 443 握手兜底
+	if tcpRes, ok := probeTCP443(target, alt, 500*time.Millisecond); ok {
+		return tcpRes
+	}
+
+	return res
+}
+
+func (p *Pinger) pingICMP(target string, timeoutMs uintptr) monitor.Probe {
+	result := monitor.Probe{Target: target, Uplink: monitor.UplinkUnknown}
 	ip, err := ipv4(target)
 	if err != nil {
-		result.Uplink = monitor.UplinkLocalError
-		result.Detail = err.Error()
-		result.At = time.Now()
-		return result
-	}
-	if _, err = ReadCounters(target); err != nil {
 		result.Uplink = monitor.UplinkLocalError
 		result.Detail = err.Error()
 		result.At = time.Now()
@@ -137,7 +166,7 @@ func (p *Pinger) Ping(target string) monitor.Probe {
 		0,
 		uintptr(unsafe.Pointer(&p.reply[0])),
 		uintptr(unsafe.Sizeof(p.reply)),
-		650,
+		timeoutMs,
 	)
 	result.At = time.Now()
 	if n == 0 {
@@ -156,8 +185,34 @@ func (p *Pinger) Ping(target string) monitor.Probe {
 	}
 	result.Success = true
 	result.Uplink = monitor.UplinkConfirmed
-	result.RTT = time.Duration(words[2]) * time.Millisecond
+	rttMs := words[2]
+	if rttMs == 0 {
+		rttMs = 1
+	}
+	result.RTT = time.Duration(rttMs) * time.Millisecond
 	return result
+}
+
+func probeTCP443(primary, secondary string, timeout time.Duration) (monitor.Probe, bool) {
+	for _, host := range []string{primary, secondary} {
+		start := time.Now()
+		conn, err := net.DialTimeout("tcp4", net.JoinHostPort(host, "443"), timeout)
+		if err == nil {
+			rtt := time.Since(start)
+			_ = conn.Close()
+			if rtt < time.Millisecond {
+				rtt = time.Millisecond
+			}
+			return monitor.Probe{
+				Success: true,
+				Uplink:  monitor.UplinkConfirmed,
+				RTT:     rtt,
+				Target:  host,
+				At:      time.Now(),
+			}, true
+		}
+	}
+	return monitor.Probe{}, false
 }
 
 type Watcher struct {

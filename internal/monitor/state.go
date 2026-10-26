@@ -37,19 +37,26 @@ type Tracker struct {
 
 func (t *Tracker) Reset() { t.Status, t.Failures = Unknown, 0 }
 
-// Apply 在第二次连续失败时触发 Offline 告警；单次成功响应立即恢复 Online。
+// Apply 采用平滑防抖机制更新连通性状态：
+// - 已处于 Online 时，第 1 次单点失败保持 Online（屏蔽瞬时抖动）；
+// - 连续 2~3 次失败进入 Degraded（待确认）；
+// - 连续 4 次及以上失败触发 Offline（断网警告）；
+// - 任意单次成功响应立即恢复 Online。
 func (t *Tracker) Apply(p Probe) bool {
 	old := t.Status
 	if p.Success {
 		t.Status, t.Failures = Online, 0
 		return old != Online
 	}
-	if t.Failures < 2 {
+	if t.Failures < 10 {
 		t.Failures++
 	}
-	if t.Failures >= 2 {
+	switch {
+	case t.Failures == 1 && old == Online:
+		t.Status = Online
+	case t.Failures >= 4:
 		t.Status = Offline
-	} else {
+	default:
 		t.Status = Degraded
 	}
 	return false

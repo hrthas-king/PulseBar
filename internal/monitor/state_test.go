@@ -11,17 +11,23 @@ func TestTrackerStateTransitions(t *testing.T) {
 	if tr.Status != Unknown || tr.Failures != 0 {
 		t.Fatalf("expected Unknown/0, got %s/%d", tr.Status, tr.Failures)
 	}
-	// First failure -> Degraded
+	// First failure from Unknown -> Degraded
 	if tr.Apply(Probe{Success: false}) {
 		t.Fatal("failure should not report recovery")
 	}
 	if tr.Status != Degraded || tr.Failures != 1 {
 		t.Fatalf("expected Degraded/1, got %s/%d", tr.Status, tr.Failures)
 	}
-	// Second consecutive failure -> Offline
+	// Second & third consecutive failures -> stay Degraded
 	tr.Apply(Probe{Success: false})
-	if tr.Status != Offline || tr.Failures != 2 {
-		t.Fatalf("expected Offline/2, got %s/%d", tr.Status, tr.Failures)
+	tr.Apply(Probe{Success: false})
+	if tr.Status != Degraded || tr.Failures != 3 {
+		t.Fatalf("expected Degraded/3, got %s/%d", tr.Status, tr.Failures)
+	}
+	// Fourth consecutive failure -> Offline
+	tr.Apply(Probe{Success: false})
+	if tr.Status != Offline || tr.Failures != 4 {
+		t.Fatalf("expected Offline/4, got %s/%d", tr.Status, tr.Failures)
 	}
 	// Single success -> Online & reports recovery
 	if !tr.Apply(Probe{Success: true, Uplink: UplinkConfirmed, RTT: 12 * time.Millisecond}) {
@@ -29,6 +35,11 @@ func TestTrackerStateTransitions(t *testing.T) {
 	}
 	if tr.Status != Online || tr.Failures != 0 {
 		t.Fatalf("expected Online/0, got %s/%d", tr.Status, tr.Failures)
+	}
+	// Single transient failure while already Online -> stays Online (anti-jitter)
+	tr.Apply(Probe{Success: false})
+	if tr.Status != Online || tr.Failures != 1 {
+		t.Fatalf("expected transient failure from Online to stay Online/1, got %s/%d", tr.Status, tr.Failures)
 	}
 }
 

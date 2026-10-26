@@ -32,13 +32,22 @@
   - 解锁状态下按住左键可自由拖拽并记忆坐标；右键菜单支持**“锁定位置（鼠标穿透）”**与**“移到任务栏最左侧”**。
   - 支持一键切换 **绿涨红跌 / 红涨绿跌** 配色、**1s / 2s / 5s** 刷新间隔及当前用户 **开机自启**。
 
-### 2. VOO / QQQ 24×5 全时段实时无缝衔接 (TickBar 内核)
-- **四时段 24 小时无缝覆盖（美东时间 ET，周日 20:00 — 周五 20:00）**：
-  - **夜盘 (Overnight, Blue Ocean ATS / BOATS)**：`20:00 – 04:00`（8 小时）
-  - **盘前 / 早盘 (Pre-Market)**：`04:00 – 09:30`（5.5 小时）
-  - **盘中 (Regular Market)**：`09:30 – 16:00`（6.5 小时）
-  - **盘后 (Post-Market)**：`16:00 – 20:00`（4 小时）
-- **BOATS 夜盘实时成交价与跨时段无缝切换**：通过原生 WinHTTP 长会话（自动管理 Cookie 与 Crumb 令牌）单次并发拉取 `/v7/finance/quote?symbols=VOO,QQQ&overnightPrice=true`（双标的总响应仅约 `2.4 KB`，耗时 `~170ms`），直接读取 Blue Ocean ATS (`BOATS Real Time Price`) 的 `overnightMarketPrice` / `preMarketPrice` / `regularMarketPrice` / `postMarketPrice` 及各时段精确成交时间戳（`overnightMarketTime` 等），按最新真实成交时间戳无缝衔接四个时段，并在悬停提示与诊断面板中展示当前时段、数据源与最近一笔成交距今秒数。
+### 2. 全球 7 大市场标的切换与五态交易时段信号 (TickBar 内核)
+- **右键菜单一键切换 7 组主流标的对（自动持久化至 `config.json`）**：
+  1. `voo_qqq`（默认）：**标普 / 纳指 (`VOO` / `QQQ`)** —— 别名 `VOO`、`QQQ`
+  2. `soxx_smh`：**半导体 ETF (`SOXX` / `SMH`)** —— 别名 `SOXX`、`SMH`
+  3. `top2_us`：**美股市值前二 (`NVDA` / `MSFT`)** —— 别名 `NVDA`、`MSFT`
+  4. `cn_indices`：**A股指数 (`000001.SS` / `399006.SZ`)** —— 别名 `上证`、`创指`
+  5. `hk_indices`：**港股指数 (`^HSI` / `^HSTECH`)** —— 别名 `恒指`、`恒科`
+  6. `asia_indices`：**日韩指数 (`^N225` / `^KS11`)** —— 别名 `日经`、`韩指`
+  7. `eu_indices`：**欧洲指数 (`^FCHI` / `^GDAXI`)** —— 别名 `CAC40`、`DAX`
+- **五态交易时段状态信号灯**：
+  - ☀️ **早盘 / 盘前 (`PRE` / `PREPRE`)**：金黄色太阳符号 `☼`（`RGB(255, 193, 7)`）
+  - 🟢 **盘中 (`REGULAR`)**：高亮翠绿色实心圆点（`RGB(0, 230, 118)`）
+  - 🔵 **盘后 (`POST` / `POSTPOST`)**：天蓝色实心圆点（`RGB(56, 189, 248)`）
+  - 🌙 **夜盘 (`OVERNIGHT`)**：柔白月牙符号 `☾`（`RGB(226, 232, 240)`，Blue Ocean ATS 夜盘）
+  - ⚪ **休市 / 周末 (`CLOSED`)**：浅灰色实心圆点（`RGB(148, 163, 184)`）
+  - **异常提示**：连续抓取失败或超时时，在信号右侧保留红色感叹号 `!` 提示，并在悬停提示与诊断面板中展示具体原因。
 
 ### 3. 秒级网络感知与代理节点切换检测 (GeoPulse 内核)
 - **64 位出口网卡计数**：通过 `GetBestInterface` + `GetIfEntry2` 每秒读取当前有效路由出口网卡字节计数，避免物理网卡与 VPN 虚拟网卡重复统计。

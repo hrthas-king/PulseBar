@@ -1,4 +1,4 @@
-// Package market 解析并校验 VOO / QQQ 基金 24 小时全时段（夜盘 BOATS、盘前、盘中、盘后）实时行情与状态机。
+// Package market 解析并校验全球多市场标的（美股 ETF/正股、A股、港股、亚太、欧洲指数）实时行情与五态时段状态机。
 package market
 
 import (
@@ -6,24 +6,184 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	MaxBody       = 16384
+	MaxBody       = 32768
 	PrimaryHost   = "query1.finance.yahoo.com"
 	FallbackHost  = "query2.finance.yahoo.com"
 	CookieHost    = "fc.yahoo.com"
 	TimeoutMillis = 1500
 )
 
+const (
+	GroupVOOQQQ      = "voo_qqq"
+	GroupSOXXSMH     = "soxx_smh"
+	GroupTop2US      = "top2_us"
+	GroupCNIndices   = "cn_indices"
+	GroupHKIndices   = "hk_indices"
+	GroupAsiaIndices = "asia_indices"
+	GroupEUIndices   = "eu_indices"
+	DefaultGroup     = GroupVOOQQQ
+)
+
+// SessionState 表示五态交易时段状态信号。
+type SessionState string
+
+const (
+	StatePreMarket  SessionState = "pre_market"  // ☀️ 早盘 / 盘前 (Pre-Market)
+	StateRegular    SessionState = "regular"     // 🟢 盘中 (Regular Trading)
+	StatePostMarket SessionState = "post_market" // 🔵 盘后 (Post-Market)
+	StateOvernight  SessionState = "overnight"   // 🌙 夜盘 (Overnight)
+	StateClosed     SessionState = "closed"      // ⚪ 休市 / 周末 (Closed / Weekend)
+)
+
+// Badge 返回用于文本诊断与悬停提示的时段状态符号。
+func (s SessionState) Badge() string {
+	switch s {
+	case StatePreMarket:
+		return "☼"
+	case StateRegular:
+		return "🟢"
+	case StatePostMarket:
+		return "🔵"
+	case StateOvernight:
+		return "☾"
+	default:
+		return "⚪"
+	}
+}
+
+type GroupSpec struct {
+	ID        string
+	MenuLabel string
+	Symbols   []string
+}
+
+var Groups = []GroupSpec{
+	{ID: GroupVOOQQQ, MenuLabel: "标普 / 纳指 (VOO / QQQ)", Symbols: []string{"VOO", "QQQ"}},
+	{ID: GroupSOXXSMH, MenuLabel: "半导体 ETF (SOXX / SMH)", Symbols: []string{"SOXX", "SMH"}},
+	{ID: GroupTop2US, MenuLabel: "美股市值前二 (NVDA / MSFT)", Symbols: []string{"NVDA", "MSFT"}},
+	{ID: GroupCNIndices, MenuLabel: "A股指数 (上证 / 创指)", Symbols: []string{"000001.SS", "399006.SZ"}},
+	{ID: GroupHKIndices, MenuLabel: "港股指数 (恒指 / 恒科)", Symbols: []string{"^HSI", "^HSTECH"}},
+	{ID: GroupAsiaIndices, MenuLabel: "日韩指数 (日经225 / 韩国综合)", Symbols: []string{"^N225", "^KS11"}},
+	{ID: GroupEUIndices, MenuLabel: "欧洲指数 (法国CAC / 德国DAX)", Symbols: []string{"^FCHI", "^GDAXI"}},
+}
+
 var (
-	Symbols = []string{"VOO", "QQQ"}
+	groupMu     sync.RWMutex
+	activeGroup = Groups[0]
+	Symbols     = []string{"VOO", "QQQ"}
+
+	Aliases = map[string]string{
+		"VOO":       "VOO",
+		"QQQ":       "QQQ",
+		"SOXX":      "SOXX",
+		"SMH":       "SMH",
+		"NVDA":      "NVDA",
+		"MSFT":      "MSFT",
+		"000001.SS": "上证",
+		"399006.SZ": "创指",
+		"^HSI":      "恒指",
+		"^HSTECH":   "恒科",
+		"^N225":     "日经",
+		"^KS11":     "韩指",
+		"^FCHI":     "CAC40",
+		"^GDAXI":    "DAX",
+	}
+
 	Tickers = map[string]string{
-		"VOO": "NYSEArca:VOO",
-		"QQQ": "NASDAQ:QQQ",
+		"VOO":       "NYSEArca:VOO",
+		"QQQ":       "NASDAQ:QQQ",
+		"SOXX":      "NASDAQ:SOXX",
+		"SMH":       "NASDAQ:SMH",
+		"NVDA":      "NASDAQ:NVDA",
+		"MSFT":      "NASDAQ:MSFT",
+		"000001.SS": "SSE:000001",
+		"399006.SZ": "SZSE:399006",
+		"^HSI":      "HKEX:HSI",
+		"^HSTECH":   "HKEX:HSTECH",
+		"^N225":     "OSE:N225",
+		"^KS11":     "KRX:KS11",
+		"^FCHI":     "Euronext:CAC40",
+		"^GDAXI":    "XETRA:DAX",
+	}
+
+	allowedCurrencies = map[string]bool{
+		"USD": true,
+		"CNY": true,
+		"HKD": true,
+		"JPY": true,
+		"EUR": true,
+		"KRW": true,
+		"":    true,
+	}
+
+	allowedQuoteTypes = map[string]bool{
+		"ETF":    true,
+		"EQUITY": true,
+		"INDEX":  true,
+		"":       true,
 	}
 )
+
+func ValidGroup(id string) bool {
+	for _, g := range Groups {
+		if g.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func GroupByID(id string) GroupSpec {
+	for _, g := range Groups {
+		if g.ID == id {
+			return g
+		}
+	}
+	return Groups[0]
+}
+
+func SetActiveGroup(id string) GroupSpec {
+	g := GroupByID(id)
+	groupMu.Lock()
+	activeGroup = g
+	Symbols = append([]string(nil), g.Symbols...)
+	groupMu.Unlock()
+	return g
+}
+
+func ActiveGroup() GroupSpec {
+	groupMu.RLock()
+	g := activeGroup
+	groupMu.RUnlock()
+	return g
+}
+
+func ActiveSymbols() []string {
+	groupMu.RLock()
+	out := append([]string(nil), activeGroup.Symbols...)
+	groupMu.RUnlock()
+	return out
+}
+
+func AliasFor(symbol string) string {
+	if a, ok := Aliases[symbol]; ok && a != "" {
+		return a
+	}
+	return symbol
+}
+
+func normalizeSymbol(sym string) string {
+	s := strings.TrimSpace(sym)
+	if strings.EqualFold(s, "HSTECH.HK") {
+		return "^HSTECH"
+	}
+	return s
+}
 
 type HTTPError struct {
 	StatusCode int
@@ -34,17 +194,22 @@ func (e HTTPError) Error() string {
 }
 
 type Quote struct {
-	Symbol        string  `json:"symbol"`
-	Price         float64 `json:"price"`
-	ChangePercent float64 `json:"change_percent"`
-	ChangeAbs     float64 `json:"change_abs"`
-	RegularPrice  float64 `json:"regular_price"`
-	TradeTime     int64   `json:"trade_time,omitempty"`
-	QuoteSource   string  `json:"quote_source,omitempty"`
-	UpdateMode    string  `json:"update_mode"`
-	Session       string  `json:"session"`
-	Description   string  `json:"description"`
-	RTTMs         float64 `json:"rtt_ms"`
+	Symbol        string       `json:"symbol"`
+	Alias         string       `json:"alias"`
+	Price         float64      `json:"price"`
+	ChangePercent float64      `json:"change_percent"`
+	ChangeAbs     float64      `json:"change_abs"`
+	RegularPrice  float64      `json:"regular_price"`
+	Currency      string       `json:"currency,omitempty"`
+	QuoteType     string       `json:"quote_type,omitempty"`
+	MarketState   string       `json:"market_state,omitempty"`
+	State         SessionState `json:"session_state"`
+	TradeTime     int64        `json:"trade_time,omitempty"`
+	QuoteSource   string       `json:"quote_source,omitempty"`
+	UpdateMode    string       `json:"update_mode"`
+	Session       string       `json:"session"`
+	Description   string       `json:"description"`
+	RTTMs         float64      `json:"rtt_ms"`
 }
 
 func (q Quote) Previous() float64 {
@@ -55,12 +220,19 @@ func (q Quote) SessionText() string {
 	if q.Session != "" {
 		return q.Session
 	}
-	return "24h 全时段实时"
+	return "实时行情"
+}
+
+func (q Quote) DisplayName() string {
+	if q.Alias != "" {
+		return q.Alias
+	}
+	return AliasFor(q.Symbol)
 }
 
 func ValidateQuote(q Quote) error {
 	if _, ok := Tickers[q.Symbol]; !ok {
-		return fmt.Errorf("标的不匹配")
+		return fmt.Errorf("标的不匹配 (%s)", q.Symbol)
 	}
 	for _, v := range []float64{q.Price, q.ChangePercent, q.ChangeAbs, q.RTTMs} {
 		if math.IsNaN(v) || math.IsInf(v, 0) {
@@ -72,7 +244,7 @@ func ValidateQuote(q Quote) error {
 		return fmt.Errorf("价格、基准或请求耗时无效")
 	}
 	calc := q.ChangeAbs / prev * 100.0
-	if math.IsNaN(calc) || math.IsInf(calc, 0) || !isClose(calc, q.ChangePercent, 1e-6, 0.025) {
+	if math.IsNaN(calc) || math.IsInf(calc, 0) || !isClose(calc, q.ChangePercent, 1e-5, 0.05) {
 		return fmt.Errorf("最新价、涨跌额与涨跌幅不一致")
 	}
 	if q.UpdateMode == "" || len(q.UpdateMode) > 80 {
@@ -134,12 +306,13 @@ type sessionCandidate struct {
 	changeAbs float64
 	changePct float64
 	tradeTime int64
+	state     SessionState
 	session   string
 	mode      string
 	valid     bool
 }
 
-func makeCandidate(price, chg, pct *float64, ts *int64, session, mode string) sessionCandidate {
+func makeCandidate(price, chg, pct *float64, ts *int64, state SessionState, session, mode string) sessionCandidate {
 	if price == nil || chg == nil || pct == nil || *price <= 0 {
 		return sessionCandidate{}
 	}
@@ -152,7 +325,7 @@ func makeCandidate(price, chg, pct *float64, ts *int64, session, mode string) se
 	cp := *pct
 	if prev := p - c; prev > 0 {
 		calc := c / prev * 100.0
-		if !math.IsNaN(calc) && !math.IsInf(calc, 0) && !isClose(calc, cp, 1e-6, 0.025) && math.Abs(calc-cp) < 0.25 {
+		if !math.IsNaN(calc) && !math.IsInf(calc, 0) && !isClose(calc, cp, 1e-5, 0.05) && math.Abs(calc-cp) < 0.35 {
 			cp = calc
 		}
 	}
@@ -161,14 +334,84 @@ func makeCandidate(price, chg, pct *float64, ts *int64, session, mode string) se
 		changeAbs: c,
 		changePct: cp,
 		tradeTime: t,
+		state:     state,
 		session:   session,
 		mode:      mode,
 		valid:     true,
 	}
 }
 
-// ParseYahooQuoteBatch 解析 /v7/finance/quote?overnightPrice=true 返回的 24h 全时段（夜盘 BOATS / 盘前 / 盘中 / 盘后）实时行情。
+// ResolveSessionState 优先根据 Yahoo API 返回的 marketState 判定五态时段状态；若字段缺失则结合交易所时区偏移与当前时间兜底推断。
+func ResolveSessionState(marketState string, now time.Time, gmtOffsetSeconds int64) (SessionState, string) {
+	switch strings.ToUpper(strings.TrimSpace(marketState)) {
+	case "PRE", "PREPRE":
+		return StatePreMarket, "盘前 (Pre-Market)"
+	case "REGULAR":
+		return StateRegular, "盘中 (Regular)"
+	case "POST", "POSTPOST":
+		return StatePostMarket, "盘后 (Post-Market)"
+	case "OVERNIGHT":
+		return StateOvernight, "夜盘 (Overnight)"
+	case "CLOSED":
+		return StateClosed, "休市 (Closed)"
+	}
+	return inferSessionByClock(now, gmtOffsetSeconds)
+}
+
+func inferSessionByClock(now time.Time, gmtOffsetSeconds int64) (SessionState, string) {
+	if gmtOffsetSeconds == 0 {
+		gmtOffsetSeconds = -14400
+	}
+	local := now.UTC().Add(time.Duration(gmtOffsetSeconds) * time.Second)
+	wd := local.Weekday()
+	mins := local.Hour()*60 + local.Minute()
+
+	// 美区时区（UTC-4 / UTC-5）具备 24×5 夜盘/盘前/盘中/盘后四段结构
+	if gmtOffsetSeconds < 0 {
+		if wd == time.Saturday || (wd == time.Friday && mins >= 20*60) || (wd == time.Sunday && mins < 20*60) {
+			return StateClosed, "周末休市"
+		}
+		switch {
+		case mins >= 4*60 && mins < 9*60+30:
+			return StatePreMarket, "盘前 (Pre-Market)"
+		case mins >= 9*60+30 && mins < 16*60:
+			return StateRegular, "盘中 (Regular)"
+		case mins >= 16*60 && mins < 20*60:
+			return StatePostMarket, "盘后 (Post-Market)"
+		default:
+			return StateOvernight, "夜盘 (Overnight)"
+		}
+	}
+
+	// 亚太及欧洲时区（UTC+1 ~ UTC+9）
+	if wd == time.Saturday || wd == time.Sunday {
+		return StateClosed, "周末休市"
+	}
+	switch {
+	case mins >= 8*60+30 && mins < 9*60+30:
+		return StatePreMarket, "盘前 (Pre-Market)"
+	case mins >= 9*60+30 && mins < 16*60+30:
+		return StateRegular, "盘中 (Regular)"
+	case mins >= 16*60+30 && mins < 17*60+30:
+		return StatePostMarket, "盘后 (Post-Market)"
+	default:
+		return StateClosed, "休市 (Closed)"
+	}
+}
+
+// DetectSession 根据交易所时区偏移返回当前时段文本描述。
+func DetectSession(now time.Time, gmtOffsetSeconds int64) string {
+	_, label := inferSessionByClock(now, gmtOffsetSeconds)
+	return label
+}
+
+// ParseYahooQuoteBatch 解析 /v7/finance/quote 返回的多市场行情批次。
 func ParseYahooQuoteBatch(body []byte, rttMs float64, now time.Time) (map[string]SymbolResult, error) {
+	return ParseYahooQuoteBatchForSymbols(ActiveSymbols(), body, rttMs, now)
+}
+
+// ParseYahooQuoteBatchForSymbols 解析指定标的列表的 /v7/finance/quote 行情批次。
+func ParseYahooQuoteBatchForSymbols(expectedSymbols []string, body []byte, rttMs float64, now time.Time) (map[string]SymbolResult, error) {
 	if len(body) > MaxBody {
 		return nil, fmt.Errorf("响应超过 %d 字节上限", MaxBody)
 	}
@@ -180,9 +423,10 @@ func ParseYahooQuoteBatch(body []byte, rttMs float64, now time.Time) (map[string
 		return nil, fmt.Errorf("缺少行情结果")
 	}
 
-	out := make(map[string]SymbolResult, len(Symbols))
+	out := make(map[string]SymbolResult, len(expectedSymbols))
 	var anySuccess bool
 	for _, item := range resp.QuoteResponse.Result {
+		item.Symbol = normalizeSymbol(item.Symbol)
 		if _, ok := Tickers[item.Symbol]; !ok {
 			continue
 		}
@@ -195,7 +439,7 @@ func ParseYahooQuoteBatch(body []byte, rttMs float64, now time.Time) (map[string
 			out[item.Symbol] = SymbolResult{Quote: &qCopy}
 		}
 	}
-	for _, sym := range Symbols {
+	for _, sym := range expectedSymbols {
 		if _, ok := out[sym]; !ok {
 			out[sym] = SymbolResult{Err: "缺少标的响应"}
 		}
@@ -207,33 +451,34 @@ func ParseYahooQuoteBatch(body []byte, rttMs float64, now time.Time) (map[string
 }
 
 func parseYahooQuoteItem(item yahooQuoteItem, rttMs float64, now time.Time) (Quote, error) {
-	if item.Currency != "USD" || item.QuoteType != "ETF" {
-		return Quote{}, fmt.Errorf("类型或币种不匹配 (%s/%s)", item.QuoteType, item.Currency)
+	cur := strings.ToUpper(strings.TrimSpace(item.Currency))
+	qt := strings.ToUpper(strings.TrimSpace(item.QuoteType))
+	if !allowedCurrencies[cur] || !allowedQuoteTypes[qt] {
+		return Quote{}, fmt.Errorf("不支持的类型或币种 (%s/%s)", item.QuoteType, item.Currency)
 	}
 	desc := strings.TrimSpace(item.LongName)
 	if desc == "" {
 		desc = strings.TrimSpace(item.ShortName)
 	}
 	if desc == "" {
-		desc = item.Symbol + " ETF"
+		desc = AliasFor(item.Symbol)
 	}
 	var regPrice float64
 	if item.RegularMarketPrice != nil {
 		regPrice = *item.RegularMarketPrice
 	}
 
-	reg := makeCandidate(item.RegularMarketPrice, item.RegularMarketChange, item.RegularMarketChangePercent, item.RegularMarketTime, "盘中 (Regular)", "regular_realtime")
-	post := makeCandidate(item.PostMarketPrice, item.PostMarketChange, item.PostMarketChangePercent, item.PostMarketTime, "盘后 (Post-Market)", "post_market_realtime")
-	ovn := makeCandidate(item.OvernightMarketPrice, item.OvernightMarketChange, item.OvernightMarketChangePercent, item.OvernightMarketTime, "夜盘 (Overnight BOATS)", "overnight_boats_realtime")
-	pre := makeCandidate(item.PreMarketPrice, item.PreMarketChange, item.PreMarketChangePercent, item.PreMarketTime, "盘前 (Pre-Market)", "pre_market_realtime")
+	reg := makeCandidate(item.RegularMarketPrice, item.RegularMarketChange, item.RegularMarketChangePercent, item.RegularMarketTime, StateRegular, "盘中 (Regular)", "regular_realtime")
+	post := makeCandidate(item.PostMarketPrice, item.PostMarketChange, item.PostMarketChangePercent, item.PostMarketTime, StatePostMarket, "盘后 (Post-Market)", "post_market_realtime")
+	ovn := makeCandidate(item.OvernightMarketPrice, item.OvernightMarketChange, item.OvernightMarketChangePercent, item.OvernightMarketTime, StateOvernight, "夜盘 (Overnight BOATS)", "overnight_boats_realtime")
+	pre := makeCandidate(item.PreMarketPrice, item.PreMarketChange, item.PreMarketChangePercent, item.PreMarketTime, StatePreMarket, "盘前 (Pre-Market)", "pre_market_realtime")
 
-	state := strings.ToUpper(strings.TrimSpace(item.MarketState))
+	rawState := strings.ToUpper(strings.TrimSpace(item.MarketState))
 	var chosen sessionCandidate
 
-	if state == "REGULAR" && reg.valid {
+	if rawState == "REGULAR" && reg.valid {
 		chosen = reg
 	} else {
-		// 按真实成交时间戳选择最新活跃时段，确保夜盘->盘前->盘中->盘后切换无缝且绝不回退到旧一日数据
 		for _, c := range []sessionCandidate{ovn, pre, post, reg} {
 			if !c.valid {
 				continue
@@ -242,14 +487,13 @@ func parseYahooQuoteItem(item yahooQuoteItem, rttMs float64, now time.Time) (Quo
 				chosen = c
 			}
 		}
-		// 若无时间戳字段则按 marketState 选择
 		if chosen.tradeTime == 0 {
 			switch {
-			case state == "OVERNIGHT" && ovn.valid:
+			case rawState == "OVERNIGHT" && ovn.valid:
 				chosen = ovn
-			case strings.HasPrefix(state, "PRE") && pre.valid:
+			case strings.HasPrefix(rawState, "PRE") && pre.valid:
 				chosen = pre
-			case strings.HasPrefix(state, "POST") && post.valid:
+			case strings.HasPrefix(rawState, "POST") && post.valid:
 				chosen = post
 			case reg.valid:
 				chosen = reg
@@ -262,26 +506,34 @@ func parseYahooQuoteItem(item yahooQuoteItem, rttMs float64, now time.Time) (Quo
 	}
 
 	gmtSec := item.GMTOffsetMilliseconds / 1000
-	clockSession := DetectSession(now, gmtSec)
-	if clockSession == "周末休市" && (state == "CLOSED" || strings.HasPrefix(state, "POST")) {
-		chosen.session = "周末休市 (收盘)"
+	resolvedState, resolvedLabel := ResolveSessionState(item.MarketState, now, gmtSec)
+	if strings.TrimSpace(item.MarketState) == "" && chosen.state != "" {
+		resolvedState = chosen.state
+		resolvedLabel = chosen.session
+	} else if resolvedState == StateOvernight && chosen.mode == "overnight_boats_realtime" {
+		resolvedLabel = "夜盘 (Overnight BOATS)"
 	}
 
 	src := strings.TrimSpace(item.QuoteSourceName)
 	if src == "" {
-		src = "Yahoo Finance Real-Time"
+		src = "Yahoo Finance"
 	}
 
 	q := Quote{
 		Symbol:        item.Symbol,
+		Alias:         AliasFor(item.Symbol),
 		Price:         chosen.price,
 		ChangePercent: chosen.changePct,
 		ChangeAbs:     chosen.changeAbs,
 		RegularPrice:  regPrice,
+		Currency:      cur,
+		QuoteType:     qt,
+		MarketState:   rawState,
+		State:         resolvedState,
 		TradeTime:     chosen.tradeTime,
 		QuoteSource:   src,
 		UpdateMode:    chosen.mode,
-		Session:       chosen.session,
+		Session:       resolvedLabel,
 		Description:   desc,
 		RTTMs:         rttMs,
 	}
@@ -303,6 +555,7 @@ type yahooMeta struct {
 	Currency                   string   `json:"currency"`
 	Symbol                     string   `json:"symbol"`
 	InstrumentType             string   `json:"instrumentType"`
+	MarketState                string   `json:"marketState"`
 	ShortName                  string   `json:"shortName"`
 	LongName                   string   `json:"longName"`
 	GMTOffset                  int64    `json:"gmtoffset"`
@@ -316,32 +569,7 @@ type yahooMeta struct {
 	FulldayChangePercent       *float64 `json:"fulldayChangePercent"`
 }
 
-// DetectSession 根据美东时间（利用接口返回的 gmtoffset 或 UTC-4/-5）判断当前处于夜盘、盘前、盘中、盘后或周末休市。
-func DetectSession(now time.Time, gmtOffsetSeconds int64) string {
-	if gmtOffsetSeconds == 0 {
-		gmtOffsetSeconds = -14400
-	}
-	et := now.UTC().Add(time.Duration(gmtOffsetSeconds) * time.Second)
-	wd := et.Weekday()
-	mins := et.Hour()*60 + et.Minute()
-
-	// 周六全天、周五 20:00 后、周日 20:00 前为周末休市
-	if wd == time.Saturday || (wd == time.Friday && mins >= 20*60) || (wd == time.Sunday && mins < 20*60) {
-		return "周末休市"
-	}
-	switch {
-	case mins >= 4*60 && mins < 9*60+30:
-		return "盘前 (Pre-Market)"
-	case mins >= 9*60+30 && mins < 16*60:
-		return "盘中 (Regular)"
-	case mins >= 16*60 && mins < 20*60:
-		return "盘后 (Post-Market)"
-	default:
-		return "夜盘 (Overnight)"
-	}
-}
-
-// ParseYahooChart 解析单标的 /v8/finance/chart 备用接口行情，并在非盘中时段自动修正相对于最近常规收盘价的涨跌幅。
+// ParseYahooChart 解析单标的 /v8/finance/chart 备用接口行情，兼容 ETF、正股与全球指数。
 func ParseYahooChart(expectedSymbol string, body []byte, rttMs float64, now time.Time) (Quote, error) {
 	if len(body) > MaxBody {
 		return Quote{}, fmt.Errorf("响应超过 %d 字节上限", MaxBody)
@@ -354,21 +582,24 @@ func ParseYahooChart(expectedSymbol string, body []byte, rttMs float64, now time
 		return Quote{}, fmt.Errorf("缺少或重复行情结果")
 	}
 	m := resp.Chart.Result[0].Meta
-	if m.Symbol != expectedSymbol || m.Currency != "USD" || m.InstrumentType != "ETF" {
+	sym := normalizeSymbol(m.Symbol)
+	cur := strings.ToUpper(strings.TrimSpace(m.Currency))
+	inst := strings.ToUpper(strings.TrimSpace(m.InstrumentType))
+	if sym != expectedSymbol || !allowedCurrencies[cur] || !allowedQuoteTypes[inst] {
 		return Quote{}, fmt.Errorf("标的、类型或币种不匹配 (%s/%s/%s)", m.Symbol, m.InstrumentType, m.Currency)
 	}
-	desc := m.LongName
+	desc := strings.TrimSpace(m.LongName)
 	if desc == "" {
-		desc = m.ShortName
+		desc = strings.TrimSpace(m.ShortName)
 	}
 	if desc == "" {
-		desc = expectedSymbol + " ETF"
+		desc = AliasFor(expectedSymbol)
 	}
 	var regPrice float64
 	if m.RegularMarketPrice != nil {
 		regPrice = *m.RegularMarketPrice
 	}
-	session := DetectSession(now, m.GMTOffset)
+	state, session := ResolveSessionState(m.MarketState, now, m.GMTOffset)
 
 	var price, changeAbs, changePct float64
 	mode := "24h_fullday_realtime"
@@ -376,11 +607,10 @@ func ParseYahooChart(expectedSymbol string, body []byte, rttMs float64, now time
 		price = *m.FulldayPrice
 		changeAbs = *m.FulldayChange
 		changePct = *m.FulldayChangePercent
-		// 若处于夜盘/盘前/盘后，且 fulldayChange 仍以两日前 chartPreviousClose 为基准，则先校验原始字段一致性，再修正为相对于最新常规收盘价 regPrice 的当日扩展时段涨跌幅
-		if session != "盘中 (Regular)" && regPrice > 0 && m.ChartPreviousClose != nil && *m.ChartPreviousClose > 0 {
+		if state != StateRegular && regPrice > 0 && m.ChartPreviousClose != nil && *m.ChartPreviousClose > 0 {
 			rawPrev := price - changeAbs
 			rawCalc := changeAbs / rawPrev * 100.0
-			if isClose(rawCalc, changePct, 1e-6, 0.025) && math.Abs(*m.ChartPreviousClose-regPrice) > 1e-4 && math.Abs(rawPrev-*m.ChartPreviousClose) < 0.05 {
+			if isClose(rawCalc, changePct, 1e-5, 0.05) && math.Abs(*m.ChartPreviousClose-regPrice) > 1e-4 && math.Abs(rawPrev-*m.ChartPreviousClose) < 0.05 {
 				changeAbs = price - regPrice
 				changePct = changeAbs / regPrice * 100.0
 			}
@@ -409,10 +639,15 @@ func ParseYahooChart(expectedSymbol string, body []byte, rttMs float64, now time
 
 	q := Quote{
 		Symbol:        expectedSymbol,
+		Alias:         AliasFor(expectedSymbol),
 		Price:         price,
 		ChangePercent: changePct,
 		ChangeAbs:     changeAbs,
 		RegularPrice:  regPrice,
+		Currency:      cur,
+		QuoteType:     inst,
+		MarketState:   strings.ToUpper(strings.TrimSpace(m.MarketState)),
+		State:         state,
 		TradeTime:     m.RegularMarketTime,
 		QuoteSource:   "Yahoo Chart Fallback",
 		UpdateMode:    mode,
@@ -427,11 +662,33 @@ func ParseYahooChart(expectedSymbol string, body []byte, rttMs float64, now time
 }
 
 type View struct {
-	Symbol      string   `json:"symbol"`
-	Quote       *Quote   `json:"quote,omitempty"`
-	Healthy     bool     `json:"healthy"`
-	Reason      string   `json:"reason,omitempty"`
-	ReceivedAge *float64 `json:"received_age_seconds,omitempty"`
+	Symbol      string       `json:"symbol"`
+	Alias       string       `json:"alias"`
+	State       SessionState `json:"session_state"`
+	Quote       *Quote       `json:"quote,omitempty"`
+	Healthy     bool         `json:"healthy"`
+	Reason      string       `json:"reason,omitempty"`
+	ReceivedAge *float64     `json:"received_age_seconds,omitempty"`
+}
+
+func (v View) DisplayName() string {
+	if v.Alias != "" {
+		return v.Alias
+	}
+	if v.Quote != nil && v.Quote.Alias != "" {
+		return v.Quote.Alias
+	}
+	return AliasFor(v.Symbol)
+}
+
+func (v View) EffectiveState() SessionState {
+	if v.Quote != nil && v.Quote.State != "" {
+		return v.Quote.State
+	}
+	if v.State != "" {
+		return v.State
+	}
+	return StateClosed
 }
 
 func (v View) Tooltip() string {
@@ -440,12 +697,17 @@ func (v View) Tooltip() string {
 		status = "数据异常 — " + v.Reason
 	}
 	session := "等待数据"
+	stateBadge := v.EffectiveState().Badge()
 	if v.Quote != nil {
 		session = v.Quote.SessionText()
 	}
 	fetched := "尚未成功读取"
 	if v.ReceivedAge != nil {
 		fetched = fmt.Sprintf("%.1fs 前轮询", *v.ReceivedAge)
+	}
+	name := v.DisplayName()
+	if name != v.Symbol {
+		name = fmt.Sprintf("%s (%s)", name, v.Symbol)
 	}
 	if v.Quote != nil {
 		tradeInfo := ""
@@ -464,12 +726,12 @@ func (v View) Tooltip() string {
 		if v.Quote.QuoteSource != "" {
 			srcInfo = "；数据源: " + v.Quote.QuoteSource
 		}
-		return fmt.Sprintf("%s: %.2f (%+.2f%%, 涨跌 %+.2f, 常规收盘 %.2f) | %s\n  %s (%s)；时段: %s%s%s；%s",
-			v.Symbol, v.Quote.Price, v.Quote.ChangePercent, v.Quote.ChangeAbs, v.Quote.RegularPrice, status,
-			v.Quote.Description, Tickers[v.Symbol], session, srcInfo, tradeInfo, fetched)
+		return fmt.Sprintf("%s %s: %.2f (%+.2f%%, 涨跌 %+.2f, 常规收盘 %.2f) | %s\n  %s (%s)；时段: %s %s%s%s；%s",
+			stateBadge, name, v.Quote.Price, v.Quote.ChangePercent, v.Quote.ChangeAbs, v.Quote.RegularPrice, status,
+			v.Quote.Description, Tickers[v.Symbol], stateBadge, session, srcInfo, tradeInfo, fetched)
 	}
-	return fmt.Sprintf("%s: %s\n  %s；%s；%s",
-		v.Symbol, status, Tickers[v.Symbol], session, fetched)
+	return fmt.Sprintf("%s %s: %s\n  %s；%s；%s",
+		stateBadge, name, status, Tickers[v.Symbol], session, fetched)
 }
 
 type feedState struct {
@@ -480,23 +742,42 @@ type feedState struct {
 }
 
 type Tracker struct {
-	feeds map[string]*feedState
+	groupID string
+	symbols []string
+	feeds   map[string]*feedState
 }
 
 func NewTracker() *Tracker {
-	t := &Tracker{feeds: make(map[string]*feedState, len(Symbols))}
+	g := ActiveGroup()
+	t := &Tracker{
+		groupID: g.ID,
+		symbols: append([]string(nil), g.Symbols...),
+		feeds:   make(map[string]*feedState, len(g.Symbols)),
+	}
 	t.Reset()
 	return t
 }
 
+func (t *Tracker) SetGroup(groupID string) {
+	g := GroupByID(groupID)
+	t.groupID = g.ID
+	t.symbols = append([]string(nil), g.Symbols...)
+	t.feeds = make(map[string]*feedState, len(g.Symbols))
+	t.Reset()
+}
+
 func (t *Tracker) Reset() {
-	for _, sym := range Symbols {
-		t.feeds[sym] = &feedState{err: "等待 VOO/QQQ 实时行情"}
+	if len(t.symbols) == 0 {
+		t.symbols = ActiveSymbols()
+	}
+	t.feeds = make(map[string]*feedState, len(t.symbols))
+	for _, sym := range t.symbols {
+		t.feeds[sym] = &feedState{err: "等待 " + AliasFor(sym) + " 实时行情"}
 	}
 }
 
 func (t *Tracker) ApplyBatch(batch map[string]SymbolResult, now time.Time) {
-	for _, sym := range Symbols {
+	for _, sym := range t.symbols {
 		res, ok := batch[sym]
 		if !ok {
 			t.Fail(sym, "缺少标的响应")
@@ -504,7 +785,14 @@ func (t *Tracker) ApplyBatch(batch map[string]SymbolResult, now time.Time) {
 		}
 		if res.Quote != nil {
 			q := *res.Quote
+			if q.Alias == "" {
+				q.Alias = AliasFor(sym)
+			}
 			st := t.feeds[sym]
+			if st == nil {
+				st = &feedState{}
+				t.feeds[sym] = st
+			}
 			st.quote = &q
 			st.receivedAt = now
 			st.err = ""
@@ -526,7 +814,7 @@ func (t *Tracker) Fail(sym, reason string) {
 }
 
 func (t *Tracker) FailAll(reason string) {
-	for _, sym := range Symbols {
+	for _, sym := range t.symbols {
 		t.Fail(sym, reason)
 	}
 }
@@ -536,12 +824,23 @@ func (t *Tracker) Views(now time.Time, intervalSeconds int) []View {
 		intervalSeconds = 2
 	}
 	maxAge := math.Max(float64(6*intervalSeconds)+float64(TimeoutMillis)/1000.0, 30.0)
-	out := make([]View, 0, len(Symbols))
-	for _, sym := range Symbols {
+	out := make([]View, 0, len(t.symbols))
+	for _, sym := range t.symbols {
 		st := t.feeds[sym]
+		if st == nil {
+			st = &feedState{err: "等待 " + AliasFor(sym) + " 实时行情"}
+		}
 		var agePtr *float64
 		reason := st.err
 		healthy := false
+		state := StateClosed
+		if st.quote != nil {
+			if st.quote.State != "" {
+				state = st.quote.State
+			} else {
+				state = StateRegular
+			}
+		}
 		if st.quote != nil && !st.receivedAt.IsZero() {
 			age := math.Max(0, now.Sub(st.receivedAt).Seconds())
 			agePtr = &age
@@ -551,7 +850,6 @@ func (t *Tracker) Views(now time.Time, intervalSeconds int) []View {
 				}
 				healthy = false
 			} else if st.failures < 3 {
-				// 已有新鲜缓存（30s 内）时容忍 1~2 次瞬时代理切换或网络抖动，不立即闪烁红灯
 				healthy = true
 				reason = ""
 			}
@@ -563,6 +861,8 @@ func (t *Tracker) Views(now time.Time, intervalSeconds int) []View {
 		}
 		out = append(out, View{
 			Symbol:      sym,
+			Alias:       AliasFor(sym),
+			State:       state,
 			Quote:       qCopy,
 			Healthy:     healthy,
 			Reason:      reason,

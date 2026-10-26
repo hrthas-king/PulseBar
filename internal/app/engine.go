@@ -1,4 +1,4 @@
-// Package app 统一调度四条互不阻塞的工作线：网卡计数采样、ICMP 心跳、事件驱动 IP 定位与 TradingView 期货行情轮询。
+// Package app 统一调度四条互不阻塞的工作线：网卡计数采样、ICMP 心跳、事件驱动 IP 定位与多市场行情轮询。
 package app
 
 import (
@@ -35,6 +35,7 @@ type Snapshot struct {
 	NICError        string         `json:"nic_error,omitempty"`
 	WatchError      string         `json:"watch_error,omitempty"`
 	IntervalSeconds int            `json:"display_interval_seconds"`
+	MarketGroup     string         `json:"market_group"`
 	EgressActive    bool           `json:"tun_or_proxy_active"`
 	Quotes          []market.View  `json:"quotes"`
 	At              time.Time      `json:"at"`
@@ -54,6 +55,7 @@ type Engine struct {
 	deps        Dependencies
 	Refresh     chan struct{}
 	Interval    chan int
+	Group       chan string
 	geoCooldown time.Duration
 	tunnelPoll  time.Duration
 }
@@ -63,6 +65,7 @@ func New(deps Dependencies) *Engine {
 		deps:        deps,
 		Refresh:     make(chan struct{}, 1),
 		Interval:    make(chan int, 1),
+		Group:       make(chan string, 1),
 		geoCooldown: GeoCooldown,
 		tunnelPoll:  GeoTunnelPoll,
 	}
@@ -112,6 +115,7 @@ type quoteResult struct {
 	batch map[string]market.SymbolResult
 	err   error
 	at    time.Time
+	epoch uint64
 }
 
 func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
@@ -192,6 +196,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 	snapshot := Snapshot{
 		Status:          monitor.Unknown,
 		IntervalSeconds: seconds,
+		MarketGroup:     market.ActiveGroup().ID,
 		WatchError:      e.deps.WatchError,
 	}
 	display := time.NewTicker(time.Duration(seconds) * time.Second)
@@ -212,6 +217,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 	var fetchCancel context.CancelFunc
 
 	var quoteBusy bool
+	var quoteEpoch uint64
 	var quoteFailures int
 	var quoteNextTry time.Time
 	var quoteCancel context.CancelFunc
@@ -233,6 +239,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 		snapshot.At = now
 		snapshot.Status = tracker.Status
 		snapshot.Failures = tracker.Failures
+		snapshot.MarketGroup = market.ActiveGroup().ID
 		snapshot.Quotes = quoteTracker.Views(now, QuotePollInterval(snapshot.IntervalSeconds))
 		publish(snapshot)
 	}
@@ -272,13 +279,14 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 			return
 		}
 		quoteBusy = true
+		ep := quoteEpoch
 		qCtx, qCancel := context.WithTimeout(ctx, 6*time.Second)
 		quoteCancel = qCancel
 		go func() {
 			defer qCancel()
 			batch, err := e.deps.FetchQuotes(qCtx)
 			select {
-			case quotesCh <- quoteResult{batch: batch, err: err, at: time.Now()}:
+			case quotesCh <- quoteResult{batch: batch, err: err, at: time.Now(), epoch: ep}:
 			case <-ctx.Done():
 			}
 		}()
@@ -369,6 +377,22 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 				quoteTicker.Reset(time.Duration(QuotePollInterval(n)) * time.Second)
 				emit()
 			}
+		case g := <-e.Group:
+			if market.ValidGroup(g) {
+				spec := market.SetActiveGroup(g)
+				snapshot.MarketGroup = spec.ID
+				quoteTracker.SetGroup(spec.ID)
+				quoteEpoch++
+				if quoteCancel != nil {
+					quoteCancel()
+					quoteCancel = nil
+				}
+				quoteBusy = false
+				quoteFailures = 0
+				quoteNextTry = time.Time{}
+				emit()
+				triggerQuoteFetch(true)
+			}
 		case <-poll.C:
 			requestGeo()
 		case <-tunnelPoll.C:
@@ -422,6 +446,9 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 			armGeo()
 			emit()
 		case qr := <-quotesCh:
+			if qr.epoch != quoteEpoch {
+				continue
+			}
 			quoteBusy = false
 			if quoteCancel != nil {
 				quoteCancel()
@@ -445,7 +472,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 					backoff = time.Duration(sec) * time.Second
 				}
 				quoteNextTry = qr.at.Add(backoff)
-				quoteTracker.FailAll(fmt.Sprintf("VOO/QQQ 行情请求失败 (%s)", detail))
+				quoteTracker.FailAll(fmt.Sprintf("行情请求失败 (%s)", detail))
 			} else {
 				quoteFailures = 0
 				quoteNextTry = time.Time{}

@@ -12,18 +12,19 @@ import (
 )
 
 func TestTooltipsAndFormatting(t *testing.T) {
-	voo := market.Quote{Symbol: "VOO", Price: 699.05, ChangePercent: 0.07, ChangeAbs: 0.47, RegularPrice: 698.58, TradeTime: 1792997930, QuoteSource: "BOATS Real Time Price", UpdateMode: "overnight_boats_realtime", Session: "夜盘 (Overnight BOATS)", Description: "Vanguard S&P 500 ETF"}
-	qqq := market.Quote{Symbol: "QQQ", Price: 703.55, ChangePercent: -0.12, ChangeAbs: -0.85, RegularPrice: 704.40, TradeTime: 1792997935, QuoteSource: "BOATS Real Time Price", UpdateMode: "overnight_boats_realtime", Session: "夜盘 (Overnight BOATS)", Description: "Invesco QQQ Trust"}
+	voo := market.Quote{Symbol: "VOO", Alias: "VOO", State: market.StateOvernight, Price: 699.05, ChangePercent: 0.07, ChangeAbs: 0.47, RegularPrice: 698.58, TradeTime: 1792997930, QuoteSource: "BOATS Real Time Price", UpdateMode: "overnight_boats_realtime", Session: "夜盘 (Overnight BOATS)", Description: "Vanguard S&P 500 ETF"}
+	qqq := market.Quote{Symbol: "QQQ", Alias: "QQQ", State: market.StateOvernight, Price: 703.55, ChangePercent: -0.12, ChangeAbs: -0.85, RegularPrice: 704.40, TradeTime: 1792997935, QuoteSource: "BOATS Real Time Price", UpdateMode: "overnight_boats_realtime", Session: "夜盘 (Overnight BOATS)", Description: "Invesco QQQ Trust"}
 	age := 1.2
 	snap := app.Snapshot{
-		Status: monitor.Online,
-		Geo:    ipinfo.Info{IP: "198.51.100.99", Country: "SG"},
-		Rates:  monitor.Rates{Up: 12800, Down: 1572864, Valid: true},
-		Probe:  monitor.Probe{Success: true, Uplink: monitor.UplinkConfirmed, RTT: 18 * time.Millisecond},
-		NIC:    "WLAN",
+		Status:      monitor.Online,
+		MarketGroup: market.GroupVOOQQQ,
+		Geo:         ipinfo.Info{IP: "198.51.100.99", Country: "SG"},
+		Rates:       monitor.Rates{Up: 12800, Down: 1572864, Valid: true},
+		Probe:       monitor.Probe{Success: true, Uplink: monitor.UplinkConfirmed, RTT: 18 * time.Millisecond},
+		NIC:         "WLAN",
 		Quotes: []market.View{
-			{Symbol: "VOO", Quote: &voo, Healthy: true, ReceivedAge: &age},
-			{Symbol: "QQQ", Quote: &qqq, Healthy: true, ReceivedAge: &age},
+			{Symbol: "VOO", Alias: "VOO", State: market.StateOvernight, Quote: &voo, Healthy: true, ReceivedAge: &age},
+			{Symbol: "QQQ", Alias: "QQQ", State: market.StateOvernight, Quote: &qqq, Healthy: true, ReceivedAge: &age},
 		},
 	}
 
@@ -33,12 +34,27 @@ func TestTooltipsAndFormatting(t *testing.T) {
 	}
 
 	overlayTip := OverlayTooltip(snap)
-	if !strings.Contains(overlayTip, "198.51.100.99") || !strings.Contains(overlayTip, "NYSEArca:VOO") || !strings.Contains(overlayTip, "BOATS Real Time Price") {
+	if !strings.Contains(overlayTip, "198.51.100.99") || !strings.Contains(overlayTip, "NYSEArca:VOO") || !strings.Contains(overlayTip, "BOATS Real Time Price") || !strings.Contains(overlayTip, "☾") {
 		t.Fatalf("unexpected overlay tooltip:\n%s", overlayTip)
 	}
 
-	diag := DiagnosticsText("v0.2.1", snap)
+	diag := DiagnosticsText("v0.3.0", snap)
 	if !strings.Contains(diag, "GeoPulse") || !strings.Contains(diag, "VOO") || !strings.Contains(diag, "BOATS Real Time Price") {
 		t.Fatalf("unexpected diagnostics text:\n%s", diag)
+	}
+
+	// Verify alias summary for Chinese/HK indices and unhealthy '!' marker
+	hsi := market.Quote{Symbol: "^HSI", Alias: "恒指", State: market.StatePreMarket, Price: 23211.81, ChangePercent: 0.51}
+	hstech := market.Quote{Symbol: "^HSTECH", Alias: "恒科", State: market.StatePreMarket, Price: 3857.53, ChangePercent: -0.36}
+	hkSnap := app.Snapshot{
+		MarketGroup: market.GroupHKIndices,
+		Quotes: []market.View{
+			{Symbol: "^HSI", Alias: "恒指", State: market.StatePreMarket, Quote: &hsi, Healthy: true},
+			{Symbol: "^HSTECH", Alias: "恒科", State: market.StatePreMarket, Quote: &hstech, Healthy: false, Reason: "连接超时"},
+		},
+	}
+	summary := QuoteSummary(hkSnap)
+	if summary != "恒指 23211.81 +0.51% | 恒科 3857.53 -0.36%!" {
+		t.Fatalf("unexpected HK QuoteSummary: %q", summary)
 	}
 }

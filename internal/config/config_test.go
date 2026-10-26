@@ -10,7 +10,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 
 	def := LoadFrom(path)
-	if def.IntervalSeconds != 2 || def.Placement != "left" || def.ShowNetDetail {
+	if def.IntervalSeconds != 2 || def.Placement != "left" || def.ShowNetDetail || def.MarketGroup != DefaultMarketGroup {
 		t.Fatalf("unexpected default config: %+v", def)
 	}
 
@@ -20,6 +20,7 @@ func TestConfigRoundTrip(t *testing.T) {
 		ShowNetDetail:   true,
 		Locked:          true,
 		UpIsRed:         true,
+		MarketGroup:     "hk_indices",
 		Placement:       "manual",
 		X:               &x,
 		Y:               &y,
@@ -29,6 +30,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	loaded := LoadFrom(path)
 	if loaded.IntervalSeconds != 5 || !loaded.ShowNetDetail || !loaded.Locked || !loaded.UpIsRed ||
+		loaded.MarketGroup != "hk_indices" ||
 		loaded.Placement != "manual" || loaded.X == nil || *loaded.X != 120 || *loaded.Y != 1040 {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
 	}

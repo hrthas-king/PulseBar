@@ -77,10 +77,8 @@ func resetSessionLocked() {
 }
 
 func refreshCrumbLocked(ctx context.Context, session uintptr) (string, error) {
-	// 1. 访问 fc.yahoo.com 获取会话 Cookie（返回 404/200 均会写入 Set-Cookie 到 WinHTTP 会话 Cookie 罐）
 	_, _, _ = doHTTPGet(ctx, session, CookieHost, "/", true)
 
-	// 2. 从 query1 / query2 获取 crumb 令牌
 	var lastErr error
 	for _, host := range []string{PrimaryHost, FallbackHost} {
 		if err := ctx.Err(); err != nil {
@@ -108,11 +106,13 @@ func refreshCrumbLocked(ctx context.Context, session uintptr) (string, error) {
 	return "", lastErr
 }
 
-// Fetch 通过 WinHTTP 获取 VOO 与 QQQ 的 24 小时全时段（夜盘 BOATS / 盘前 / 盘中 / 盘后）实时行情。
+// Fetch 通过 WinHTTP 获取当前激活标的分组的实时行情。
 func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	syms := ActiveSymbols()
+
 	clientMu.Lock()
 	defer clientMu.Unlock()
 
@@ -121,13 +121,11 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 		return nil, err
 	}
 
-	// 优先走带 overnightPrice=true 的 /v7/finance/quote 实时流（包含 Blue Ocean ATS 夜盘实时成交价与时间戳）
-	batch, err := fetchV7OvernightLocked(ctx, session)
+	batch, err := fetchV7OvernightLocked(ctx, session, syms)
 	if err == nil {
 		return batch, nil
 	}
 
-	// 若代理节点切换或连接失效导致失败，重建会话句柄并在独立短超时下回退到 /v8/finance/chart 接口
 	resetSessionLocked()
 	fbSession, sErr := ensureSessionLocked()
 	if sErr != nil {
@@ -135,10 +133,10 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 	}
 	fbCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	return fetchV8FallbackLocked(fbCtx, fbSession, err)
+	return fetchV8FallbackLocked(fbCtx, fbSession, syms, err)
 }
 
-func fetchV7OvernightLocked(ctx context.Context, session uintptr) (map[string]SymbolResult, error) {
+func fetchV7OvernightLocked(ctx context.Context, session uintptr, syms []string) (map[string]SymbolResult, error) {
 	crumb := cachedCrumb
 	if crumb == "" {
 		var err error
@@ -148,7 +146,7 @@ func fetchV7OvernightLocked(ctx context.Context, session uintptr) (map[string]Sy
 		}
 	}
 
-	batch, err := tryV7Batch(ctx, session, crumb)
+	batch, err := tryV7Batch(ctx, session, syms, crumb)
 	if err == nil {
 		return batch, nil
 	}
@@ -164,13 +162,24 @@ func fetchV7OvernightLocked(ctx context.Context, session uintptr) (map[string]Sy
 		if cErr != nil {
 			return nil, cErr
 		}
-		return tryV7Batch(ctx, newSession, newCrumb)
+		return tryV7Batch(ctx, newSession, syms, newCrumb)
 	}
 	return nil, err
 }
 
-func tryV7Batch(ctx context.Context, session uintptr, crumb string) (map[string]SymbolResult, error) {
-	path := "/v7/finance/quote?symbols=" + strings.Join(Symbols, ",") +
+func wireSymbolList(syms []string) string {
+	var wire []string
+	for _, s := range syms {
+		wire = append(wire, s)
+		if s == "^HSTECH" {
+			wire = append(wire, "HSTECH.HK")
+		}
+	}
+	return url.QueryEscape(strings.Join(wire, ","))
+}
+
+func tryV7Batch(ctx context.Context, session uintptr, syms []string, crumb string) (map[string]SymbolResult, error) {
+	path := "/v7/finance/quote?symbols=" + wireSymbolList(syms) +
 		"&overnightPrice=true&fields=" + quoteFields +
 		"&crumb=" + url.QueryEscape(crumb)
 
@@ -193,7 +202,7 @@ func tryV7Batch(ctx context.Context, session uintptr, crumb string) (map[string]
 			continue
 		}
 		rttMs := float64(time.Since(start).Microseconds()) / 1000.0
-		batch, parseErr := ParseYahooQuoteBatch(body, rttMs, time.Now())
+		batch, parseErr := ParseYahooQuoteBatchForSymbols(syms, body, rttMs, time.Now())
 		if parseErr == nil {
 			return batch, nil
 		}
@@ -205,12 +214,12 @@ func tryV7Batch(ctx context.Context, session uintptr, crumb string) (map[string]
 	return nil, lastErr
 }
 
-func fetchV8FallbackLocked(ctx context.Context, session uintptr, primaryErr error) (map[string]SymbolResult, error) {
-	results := make(map[string]SymbolResult, len(Symbols))
+func fetchV8FallbackLocked(ctx context.Context, session uintptr, syms []string, primaryErr error) (map[string]SymbolResult, error) {
+	results := make(map[string]SymbolResult, len(syms))
 	var anySuccess bool
 	lastErr := primaryErr
 
-	for _, sym := range Symbols {
+	for _, sym := range syms {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -231,26 +240,32 @@ func fetchV8FallbackLocked(ctx context.Context, session uintptr, primaryErr erro
 }
 
 func fetchChartSymbol(ctx context.Context, session uintptr, sym string) (Quote, error) {
-	path := "/v8/finance/chart/" + sym + "?interval=1d&range=1d&includePrePost=true"
+	candidates := []string{sym}
+	if sym == "^HSTECH" {
+		candidates = []string{"HSTECH.HK", "^HSTECH"}
+	}
 	var lastErr error
-	for _, host := range []string{PrimaryHost, FallbackHost} {
-		if err := ctx.Err(); err != nil {
-			return Quote{}, err
-		}
-		start := time.Now()
-		status, body, err := doHTTPGet(ctx, session, host, path, false)
-		if err == nil && status != 200 {
-			err = HTTPError{StatusCode: status}
-		}
-		if err == nil {
-			rttMs := float64(time.Since(start).Microseconds()) / 1000.0
-			q, parseErr := ParseYahooChart(sym, body, rttMs, time.Now())
-			if parseErr == nil {
-				return q, nil
+	for _, wireSym := range candidates {
+		path := "/v8/finance/chart/" + url.PathEscape(wireSym) + "?interval=1d&range=1d&includePrePost=true"
+		for _, host := range []string{PrimaryHost, FallbackHost} {
+			if err := ctx.Err(); err != nil {
+				return Quote{}, err
 			}
-			err = parseErr
+			start := time.Now()
+			status, body, err := doHTTPGet(ctx, session, host, path, false)
+			if err == nil && status != 200 {
+				err = HTTPError{StatusCode: status}
+			}
+			if err == nil {
+				rttMs := float64(time.Since(start).Microseconds()) / 1000.0
+				q, parseErr := ParseYahooChart(sym, body, rttMs, time.Now())
+				if parseErr == nil {
+					return q, nil
+				}
+				err = parseErr
+			}
+			lastErr = err
 		}
-		lastErr = err
 	}
 	return Quote{}, lastErr
 }

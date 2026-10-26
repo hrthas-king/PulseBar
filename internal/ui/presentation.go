@@ -9,6 +9,7 @@ import (
 
 	"github.com/hrthas-king/PulseBar/internal/app"
 	"github.com/hrthas-king/PulseBar/internal/ipinfo"
+	"github.com/hrthas-king/PulseBar/internal/market"
 	"github.com/hrthas-king/PulseBar/internal/monitor"
 )
 
@@ -86,18 +87,24 @@ func CompactRTT(s app.Snapshot) string {
 
 func QuoteSummary(s app.Snapshot) string {
 	if len(s.Quotes) == 0 {
-		return "VOO -- | QQQ --"
+		g := market.GroupByID(s.MarketGroup)
+		parts := make([]string, 0, len(g.Symbols))
+		for _, sym := range g.Symbols {
+			parts = append(parts, fmt.Sprintf("%s --", market.AliasFor(sym)))
+		}
+		return strings.Join(parts, " | ")
 	}
 	parts := make([]string, 0, len(s.Quotes))
 	for _, v := range s.Quotes {
+		name := v.DisplayName()
 		if v.Quote != nil {
 			mark := ""
 			if !v.Healthy {
 				mark = "!"
 			}
-			parts = append(parts, fmt.Sprintf("%s %.2f %+.2f%%%s", v.Symbol, v.Quote.Price, v.Quote.ChangePercent, mark))
+			parts = append(parts, fmt.Sprintf("%s %.2f %+.2f%%%s", name, v.Quote.Price, v.Quote.ChangePercent, mark))
 		} else {
-			parts = append(parts, fmt.Sprintf("%s --", v.Symbol))
+			parts = append(parts, fmt.Sprintf("%s --", name))
 		}
 	}
 	return strings.Join(parts, " | ")
@@ -120,7 +127,7 @@ func TrayTooltip(s app.Snapshot) string {
 		Country(s), StatusText(s.Status), ip, CompactRTT(s), up, down, QuoteSummary(s))
 }
 
-// OverlayTooltip 生成任务栏悬浮条的详细悬停提示，同时包含 GeoPulse 网络状态与 TradingView 行情详情。
+// OverlayTooltip 生成任务栏悬浮条的详细悬停提示，同时包含 GeoPulse 网络状态与五态时段行情详情。
 func OverlayTooltip(s app.Snapshot) string {
 	ip := s.Geo.IP
 	if ip == "" {
@@ -153,7 +160,7 @@ func OverlayTooltip(s app.Snapshot) string {
 	for _, v := range s.Quotes {
 		lines = append(lines, "【行情】"+v.Tooltip())
 	}
-	lines = append(lines, "注：覆盖夜盘(20:00-04:00)、盘前(04:00-09:30)、盘中(09:30-16:00)与盘后(16:00-20:00) 24×5 全时段实时流。")
+	lines = append(lines, "注：时段信号 ☼盘前 | 🟢盘中 | 🔵盘后 | ☾夜盘 | ⚪休市（异常时右侧显示 !）。")
 	return strings.Join(lines, "\n")
 }
 
@@ -178,12 +185,14 @@ func DiagnosticsText(version string, s app.Snapshot) string {
 	if s.NICError != "" {
 		fmt.Fprintf(&b, "  网卡提示: %s\n", s.NICError)
 	}
-	fmt.Fprintf(&b, "\n[TickBar 24h 全时段 ETF 实时监控 (VOO / QQQ)]\n")
-	fmt.Fprintf(&b, "  说明: 覆盖美东时间周日 20:00 至周五 20:00 全天 24 小时（夜盘 + 盘前 + 盘中 + 盘后）无缝实时价格流。\n\n")
+	groupSpec := market.GroupByID(s.MarketGroup)
+	fmt.Fprintf(&b, "\n[TickBar 多市场行情与五态时段监控 — %s]\n", groupSpec.MenuLabel)
+	fmt.Fprintf(&b, "  时段信号说明: ☼ 早盘/盘前 | 🟢 盘中 | 🔵 盘后 | ☾ 夜盘 | ⚪ 休市/周末\n\n")
 	for _, v := range s.Quotes {
 		fmt.Fprintf(&b, "%s\n", v.Tooltip())
 		if q := v.Quote; q != nil {
-			fmt.Fprintf(&b, "  基金描述: %s | 当前时段: %s | 数据源: %s | 更新模式: %s\n", q.Description, q.SessionText(), valueOr(q.QuoteSource, "Yahoo Real-Time"), q.UpdateMode)
+			fmt.Fprintf(&b, "  标的名称: %s (别名: %s) | 时段状态: %s %s | 数据源: %s | 模式: %s\n",
+				q.Description, v.DisplayName(), v.EffectiveState().Badge(), q.SessionText(), valueOr(q.QuoteSource, "Yahoo Finance"), q.UpdateMode)
 			fmt.Fprintf(&b, "  当前最新价: %.2f (常规盘收盘: %.2f) | 涨跌额: %+.2f | 涨跌幅: %+.3f%%\n", q.Price, q.RegularPrice, q.ChangeAbs, q.ChangePercent)
 			tradeStr := "未知"
 			if q.TradeTime > 0 {

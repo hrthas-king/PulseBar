@@ -126,6 +126,7 @@ func run(diagnose, runFor time.Duration, output string, probe, dockLeft, showDia
 
 	var latest atomic.Pointer[app.Snapshot]
 	settings := config.Load()
+	market.SetActiveGroup(settings.MarketGroup)
 	if dockLeft {
 		settings.Placement = "left"
 		settings.X = nil
@@ -201,6 +202,13 @@ func run(diagnose, runFor time.Duration, output string, probe, dockLeft, showDia
 								ui.ShowError(err)
 							} else {
 								barUI.SetAutostart(!enabled)
+							}
+						default:
+							if grp, ok := ui.GroupForAction(action); ok {
+								select {
+								case engine.Group <- grp:
+								default:
+								}
 							}
 						}
 					}

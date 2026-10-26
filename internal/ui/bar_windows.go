@@ -27,6 +27,13 @@ const (
 	ActionToggleLock
 	ActionDockLeft
 	ActionToggleColor
+	ActionGroupVOOQQQ
+	ActionGroupSOXXSMH
+	ActionGroupTop2US
+	ActionGroupCNIndices
+	ActionGroupHKIndices
+	ActionGroupAsiaIndices
+	ActionGroupEUIndices
 	ActionInterval1
 	ActionInterval2
 	ActionInterval5
@@ -35,14 +42,26 @@ const (
 	ActionExit
 )
 
+func GroupForAction(act Action) (string, bool) {
+	if act < ActionGroupVOOQQQ || act > ActionGroupEUIndices {
+		return "", false
+	}
+	idx := int(act - ActionGroupVOOQQQ)
+	if idx < 0 || idx >= len(market.Groups) {
+		return "", false
+	}
+	return market.Groups[idx].ID, true
+}
+
 const (
 	wmTray   = 0x8001
 	wmUpdate = 0x8002
 )
 
 const (
-	compactWidthLogical = 510
-	detailWidthLogical  = 668
+	slotWidthLogical    = 228
+	compactWidthLogical = 98 + 2*slotWidthLogical
+	detailWidthLogical  = 256 + 2*slotWidthLogical
 	barHeightLogical    = 30
 )
 
@@ -192,6 +211,7 @@ type UI struct {
 	width, height  int32
 	bgBrush        uintptr
 	brushGreen     uintptr
+	brushBlue      uintptr
 	brushYellow    uintptr
 	brushRed       uintptr
 	brushGray      uintptr
@@ -422,6 +442,14 @@ func (u *UI) drawTextSegment(dc uintptr, text string, leftLogical, rightLogical 
 	runtime.KeepAlive(ptr)
 }
 
+func (u *UI) drawTextCentered(dc uintptr, text string, leftLogical, rightLogical int, color uintptr) {
+	setTextColor.Call(dc, color)
+	rc := rect{Left: u.px(leftLogical), Top: 0, Right: u.px(rightLogical), Bottom: u.height}
+	ptr := winapi.UTF16(text)
+	drawText.Call(dc, uintptr(unsafe.Pointer(ptr)), ^uintptr(0), uintptr(unsafe.Pointer(&rc)), 0x20|0x4|0x1|0x8000)
+	runtime.KeepAlive(ptr)
+}
+
 func (u *UI) drawCircle(dc uintptr, brush uintptr, leftLogical, topLogical, sizeLogical int) {
 	old, _, _ := selectObject.Call(dc, brush)
 	ellipse.Call(
@@ -501,22 +529,47 @@ func (u *UI) paint(hwnd uintptr) {
 		quoteOffset = 256
 	}
 
-	// 2. 绘制 TickBar (VOO / QQQ) 24h 行情段
+	// 2. 绘制多市场行情段（五态时段信号 + 异常感叹号 + 简洁别名 + 自适应价格与涨跌幅）
 	views := snap.Quotes
 	if len(views) == 0 {
-		views = []market.View{
-			{Symbol: "VOO", Healthy: false},
-			{Symbol: "QQQ", Healthy: false},
+		g := market.GroupByID(u.cfg.MarketGroup)
+		for _, sym := range g.Symbols {
+			views = append(views, market.View{
+				Symbol:  sym,
+				Alias:   market.AliasFor(sym),
+				State:   market.StateClosed,
+				Healthy: false,
+			})
 		}
 	}
 	for i, v := range views {
-		base := quoteOffset + i*206
-		qBrush := u.brushRed
-		if v.Healthy {
-			qBrush = u.brushGreen
+		base := quoteOffset + i*slotWidthLogical
+		switch v.EffectiveState() {
+		case market.StatePreMarket:
+			u.drawTextCentered(dc, "☼", base+2, base+18, colorRef(255, 193, 7))
+		case market.StateOvernight:
+			u.drawTextCentered(dc, "☾", base+2, base+18, colorRef(226, 232, 240))
+		case market.StateRegular:
+			u.drawCircle(dc, u.brushGreen, base+6, 11, 8)
+		case market.StatePostMarket:
+			u.drawCircle(dc, u.brushBlue, base+6, 11, 8)
+		default:
+			u.drawCircle(dc, u.brushGray, base+6, 11, 8)
 		}
-		u.drawCircle(dc, qBrush, base+4, 11, 8)
-		u.drawTextSegment(dc, v.Symbol, base+16, base+56, colorRef(240, 240, 240))
+
+		aliasLeft := base + 19
+		if !v.Healthy {
+			u.drawTextSegment(dc, "!", base+17, base+25, colorRef(255, 82, 82))
+			aliasLeft = base + 25
+		}
+
+		alias := v.DisplayName()
+		aliasW := 42
+		if len(alias) >= 5 {
+			aliasW = 48
+		}
+		u.drawTextSegment(dc, alias, aliasLeft, aliasLeft+aliasW, colorRef(240, 240, 240))
+
 		text := "---.-- --.--%"
 		pctColor := colorRef(170, 170, 170)
 		if v.Quote != nil {
@@ -530,9 +583,9 @@ func (u *UI) paint(hwnd uintptr) {
 				pctColor = colorRef(119, 204, 153)
 			}
 		}
-		u.drawTextSegment(dc, text, base+57, base+194, pctColor)
+		u.drawTextSegment(dc, text, aliasLeft+aliasW+2, base+slotWidthLogical-12, pctColor)
 		if i == 0 && len(views) > 1 {
-			u.drawTextSegment(dc, "|", base+195, base+205, colorRef(120, 130, 145))
+			u.drawTextSegment(dc, "|", base+slotWidthLogical-11, base+slotWidthLogical-1, colorRef(120, 130, 145))
 		}
 	}
 }
@@ -619,6 +672,22 @@ func (u *UI) menu() {
 	add(ActionToggleColor, colorLabel, 0)
 
 	add(0, "", 0x800)
+	currentGroup := u.cfg.MarketGroup
+	if s != nil && market.ValidGroup(s.MarketGroup) {
+		currentGroup = s.MarketGroup
+	}
+	if !market.ValidGroup(currentGroup) {
+		currentGroup = market.DefaultGroup
+	}
+	for i, g := range market.Groups {
+		flags := uintptr(0)
+		if g.ID == currentGroup {
+			flags = 8
+		}
+		add(Action(uint32(ActionGroupVOOQQQ)+uint32(i)), g.MenuLabel, flags)
+	}
+
+	add(0, "", 0x800)
 	interval := u.cfg.IntervalSeconds
 	if s != nil && app.ValidInterval(s.IntervalSeconds) {
 		interval = s.IntervalSeconds
@@ -676,7 +745,27 @@ func (u *UI) handleAction(act Action) {
 	case ActionDiagnostics:
 		u.showDiagnostics()
 	default:
-		if act == ActionInterval1 || act == ActionInterval2 || act == ActionInterval5 {
+		if grp, ok := GroupForAction(act); ok {
+			u.cfg.MarketGroup = grp
+			_ = config.Save(u.cfg)
+			spec := market.SetActiveGroup(grp)
+			if s := u.latest.Load(); s != nil {
+				snap := *s
+				snap.MarketGroup = spec.ID
+				snap.Quotes = make([]market.View, 0, len(spec.Symbols))
+				for _, sym := range spec.Symbols {
+					snap.Quotes = append(snap.Quotes, market.View{
+						Symbol:  sym,
+						Alias:   market.AliasFor(sym),
+						State:   market.StateClosed,
+						Healthy: false,
+						Reason:  "等待 " + market.AliasFor(sym) + " 实时行情",
+					})
+				}
+				u.latest.Store(&snap)
+				invalidateRect.Call(u.hwnd, 0, 0)
+			}
+		} else if act == ActionInterval1 || act == ActionInterval2 || act == ActionInterval5 {
 			n := map[Action]int{ActionInterval1: 1, ActionInterval2: 2, ActionInterval5: 5}[act]
 			u.cfg.IntervalSeconds = n
 			_ = config.Save(u.cfg)
@@ -828,6 +917,7 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	u.instance, _, _ = getModule.Call(0)
 	u.bgBrush, _, _ = createSolidBrush.Call(colorRef(1, 1, 1))
 	u.brushGreen, _, _ = createSolidBrush.Call(colorRef(0, 230, 118))
+	u.brushBlue, _, _ = createSolidBrush.Call(colorRef(56, 189, 248))
 	u.brushYellow, _, _ = createSolidBrush.Call(colorRef(245, 158, 11))
 	u.brushRed, _, _ = createSolidBrush.Call(colorRef(255, 23, 68))
 	u.brushGray, _, _ = createSolidBrush.Call(colorRef(148, 163, 184))
@@ -835,7 +925,7 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	u.font, _, _ = createFont.Call(uintptr(int(-u.px(14))), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 3, 0, uintptr(unsafe.Pointer(fontName)))
 
 	defer func() {
-		for _, obj := range []uintptr{u.font, u.bgBrush, u.brushGreen, u.brushYellow, u.brushRed, u.brushGray} {
+		for _, obj := range []uintptr{u.font, u.bgBrush, u.brushGreen, u.brushBlue, u.brushYellow, u.brushRed, u.brushGray} {
 			if obj != 0 {
 				deleteObject.Call(obj)
 			}

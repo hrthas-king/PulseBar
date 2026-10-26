@@ -8,11 +8,24 @@ import (
 	"path/filepath"
 )
 
+const DefaultMarketGroup = "voo_qqq"
+
+var validMarketGroups = map[string]bool{
+	"voo_qqq":      true,
+	"soxx_smh":     true,
+	"top2_us":      true,
+	"cn_indices":   true,
+	"hk_indices":   true,
+	"asia_indices": true,
+	"eu_indices":   true,
+}
+
 type Config struct {
 	IntervalSeconds int    `json:"interval_seconds"`
 	ShowNetDetail   bool   `json:"show_net_detail"`
 	Locked          bool   `json:"locked"`
 	UpIsRed         bool   `json:"up_is_red"`
+	MarketGroup     string `json:"market_group"`
 	Placement       string `json:"placement"`
 	X               *int   `json:"x,omitempty"`
 	Y               *int   `json:"y,omitempty"`
@@ -22,12 +35,17 @@ func ValidInterval(seconds int) bool {
 	return seconds == 1 || seconds == 2 || seconds == 5
 }
 
+func ValidMarketGroup(group string) bool {
+	return validMarketGroups[group]
+}
+
 func Default() Config {
 	return Config{
 		IntervalSeconds: 2,
 		ShowNetDetail:   false,
 		Locked:          false,
 		UpIsRed:         false,
+		MarketGroup:     DefaultMarketGroup,
 		Placement:       "left",
 	}
 }
@@ -60,6 +78,9 @@ func LoadFrom(path string) Config {
 	if ValidInterval(saved.IntervalSeconds) {
 		c.IntervalSeconds = saved.IntervalSeconds
 	}
+	if ValidMarketGroup(saved.MarketGroup) {
+		c.MarketGroup = saved.MarketGroup
+	}
 	c.ShowNetDetail = saved.ShowNetDetail
 	c.Locked = saved.Locked
 	c.UpIsRed = saved.UpIsRed
@@ -84,6 +105,11 @@ func Save(c Config) error {
 func SaveTo(path string, c Config) error {
 	if !ValidInterval(c.IntervalSeconds) {
 		return fmt.Errorf("刷新间隔只能为 1、2、5 秒")
+	}
+	if c.MarketGroup == "" {
+		c.MarketGroup = DefaultMarketGroup
+	} else if !ValidMarketGroup(c.MarketGroup) {
+		return fmt.Errorf("无效的行情标的分组: %s", c.MarketGroup)
 	}
 	if c.Placement != "manual" || c.X == nil || c.Y == nil {
 		c.Placement = "left"

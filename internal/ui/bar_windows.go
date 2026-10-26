@@ -122,6 +122,7 @@ var (
 	setTextColor         = gdi32.NewProc("SetTextColor")
 	setBkMode            = gdi32.NewProc("SetBkMode")
 	ellipse              = gdi32.NewProc("Ellipse")
+	setPixel             = gdi32.NewProc("SetPixel")
 	initCommonControlsEx = comctl32.NewProc("InitCommonControlsEx")
 )
 
@@ -471,6 +472,61 @@ func (u *UI) drawCircle(dc uintptr, brush uintptr, leftLogical, topLogical, size
 	selectObject.Call(dc, old)
 }
 
+// drawPurpleMoon 使用 GDI 像素几何在 (centerXLogical, centerYLogical) 绘制无字体依赖的亮紫色实心月牙。
+func (u *UI) drawPurpleMoon(dc uintptr, centerXLogical, centerYLogical int) {
+	cx := float64(u.px(centerXLogical))
+	cy := float64(u.px(centerYLogical))
+	s := u.scale
+	outerR := 5.2 * s
+	outerR2 := outerR * outerR
+	cutX := cx + 2.3*s
+	cutY := cy - 0.9*s
+	cutR := 4.2 * s
+	cutR2 := cutR * cutR
+	purple := colorRef(186, 85, 255)
+	span := int32(math.Ceil(outerR + 1))
+	for dy := -span; dy <= span; dy++ {
+		for dx := -span; dx <= span; dx++ {
+			x := cx + float64(dx)
+			y := cy + float64(dy)
+			d1 := float64(dx*dx + dy*dy)
+			cdx := x - cutX
+			cdy := y - cutY
+			d2 := cdx*cdx + cdy*cdy
+			if d1 <= outerR2 && d2 > cutR2 {
+				setPixel.Call(dc, uintptr(int32(cx)+dx), uintptr(int32(cy)+dy), purple)
+			}
+		}
+	}
+}
+
+// drawYellowSun 使用 GDI 像素几何在 (centerXLogical, centerYLogical) 绘制无字体依赖的明黄色实心太阳与八向光芒。
+func (u *UI) drawYellowSun(dc uintptr, centerXLogical, centerYLogical int) {
+	cx := float64(u.px(centerXLogical))
+	cy := float64(u.px(centerYLogical))
+	s := u.scale
+	yellow := colorRef(255, 214, 10)
+	span := int32(math.Ceil(6.2*s + 1))
+	for dy := -span; dy <= span; dy++ {
+		for dx := -span; dx <= span; dx++ {
+			nx := float64(dx) / s
+			ny := float64(dy) / s
+			d2 := nx*nx + ny*ny
+			hit := d2 <= 3.1*3.1
+			if !hit && d2 >= 3.9*3.9 && d2 <= 5.8*5.8 {
+				ax, ay := math.Abs(nx), math.Abs(ny)
+				diag := math.Abs(ax-ay) * 0.7071
+				if ax <= 0.72 || ay <= 0.72 || diag <= 0.72 {
+					hit = true
+				}
+			}
+			if hit {
+				setPixel.Call(dc, uintptr(int32(cx)+dx), uintptr(int32(cy)+dy), yellow)
+			}
+		}
+	}
+}
+
 func (u *UI) paint(hwnd uintptr) {
 	var ps paintStruct
 	dc, _, _ := beginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
@@ -555,9 +611,9 @@ func (u *UI) paint(hwnd uintptr) {
 		base := quoteOffset + i*slotWidthLogical
 		switch v.EffectiveState() {
 		case market.StatePreMarket:
-			u.drawSymbolCentered(dc, "☀", base+2, base+18, colorRef(255, 214, 10))
+			u.drawYellowSun(dc, base+10, 15)
 		case market.StateOvernight:
-			u.drawSymbolCentered(dc, "🌙", base+2, base+18, colorRef(192, 132, 252))
+			u.drawPurpleMoon(dc, base+10, 15)
 		case market.StateRegular:
 			u.drawCircle(dc, u.brushGreen, base+6, 11, 8)
 		case market.StatePostMarket:

@@ -11,11 +11,13 @@
 
 **合二为一的极轻量 Windows 任务栏网络脉搏（GeoPulse）与 VOO / QQQ 24小时全时段实时行情条（TickBar）。**
 
-双击单个 `~3.2 MB` 的 `.exe` 即可静默运行，同时在 **任务栏最左侧悬浮条** 与 **系统托盘** 展示：
+当前版本：**v0.5.1（2026-10-27）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.5.1)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
+
+双击单个 `~3.3 MiB`（amd64 本地构建）的 `.exe` 即可静默运行，同时在 **任务栏最左侧悬浮条** 与 **系统托盘** 展示：
 1. **GeoPulse 秒级网络感知**：公网出口两位国家代码、连通性状态灯（绿/黄/红）、上下行实时流量活动箭头（或一键展开实时网速与 ICMP RTT）、TUN/系统代理节点切换自动感知。
 2. **TickBar VOO / QQQ 24×5 全时段无缝实时行情**：追踪 `VOO`（标普 500 ETF）与 `QQQ`（纳斯达克 100 ETF），无缝覆盖美东时间周日 20:00 至周五 20:00 的 **夜盘（Overnight）+ 盘前（Pre-Market）+ 盘中（Regular）+ 盘后（Post-Market）** 24 小时连续实时价格流与日涨跌幅。
 
-纯 Go 标准库直接调用 Win32 GDI、Shell_NotifyIcon、IP Helper 与 WinHTTP 系统 API；无 CGo、无 Python 解释器打包、无 Electron/WebView，运行期第三方依赖为零，私有工作集仅约 **4.5 MiB**。
+纯 Go 标准库直接调用 Win32 GDI、Shell_NotifyIcon、IP Helper 与 WinHTTP 系统 API；无 CGo、无 Python 解释器打包、无 Electron/WebView，运行期第三方依赖为零。v0.2.0 曾测得 GUI 私有工作集约 **4.41 MiB**；v0.5.1 的 GUI 内存与真实行情延迟仍待重新实测，详见 [验证记录](docs/VALIDATION.md)。
 
 ---
 
@@ -71,8 +73,18 @@
 git clone https://github.com/hrthas-king/PulseBar.git
 cd PulseBar
 ./scripts/verify.ps1
+./scripts/build.ps1 -Arch amd64 -Version v0.5.1
 ./dist/PulseBar-windows-amd64.exe
 ```
+
+`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.5.1`。如需更新本机根目录运行副本：
+
+```powershell
+Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
+./PulseBar.exe --version
+```
+
+根目录 `PulseBar.exe` 是本机运行副本，按 `.gitignore` 不进入源码仓库；GitHub 的程序下载由 Releases 提供。
 
 常用命令行参数：
 
@@ -94,7 +106,7 @@ cd PulseBar
 
 ```powershell
 ./scripts/generate-icons.ps1
-./scripts/package.ps1 -Version v0.2.0
+./scripts/package.ps1 -Version v0.5.1
 ```
 
 ---

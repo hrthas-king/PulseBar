@@ -634,7 +634,7 @@ func (u *UI) paint(hwnd uintptr) {
 		}
 		curX = u.drawFlowText(dc, fmt.Sprintf("↑%s ↓%s", upStr, downStr), curX, rateColor) + u.px(7)
 		rttColor := colorRef(148, 163, 184)
-		if snap.Probe.Success {
+		if CompactRTT(snap) != "--" {
 			rttColor = colorRef(167, 243, 208)
 		}
 		curX = u.drawFlowText(dc, CompactRTT(snap), curX, rttColor) + u.px(6)
@@ -760,7 +760,7 @@ func (u *UI) menu() {
 		if s.Rates.Valid {
 			up, down = Speed(s.Rates.Up), Speed(s.Rates.Down)
 		}
-		add(0, fmt.Sprintf("网络: ↑ %s  ↓ %s | RTT: %s", up, down, RTT(*s)), 2)
+		add(0, fmt.Sprintf("网络: ↑ %s  ↓ %s | HTTPS: %s", up, down, RTT(*s)), 2)
 		add(0, "行情: "+QuoteSummary(*s), 2)
 		if s.EgressActive {
 			add(0, "TUN/代理活跃：地区每 30 秒自动复核", 2)

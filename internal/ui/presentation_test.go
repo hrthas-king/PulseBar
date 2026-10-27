@@ -21,6 +21,7 @@ func TestTooltipsAndFormatting(t *testing.T) {
 		Geo:         ipinfo.Info{IP: "198.51.100.99", Country: "SG"},
 		Rates:       monitor.Rates{Up: 12800, Down: 1572864, Valid: true},
 		Probe:       monitor.Probe{Success: true, Uplink: monitor.UplinkConfirmed, RTT: 18 * time.Millisecond},
+		Latency:     monitor.Latency{Method: "https", Target: "https://www.cloudflare.com/cdn-cgi/trace", RTT: 18 * time.Millisecond, At: time.Now()},
 		NIC:         "WLAN",
 		Quotes: []market.View{
 			{Symbol: "VOO", Alias: "VOO", State: market.StateOvernight, Quote: &voo, Healthy: true, ReceivedAge: &age},
@@ -56,5 +57,36 @@ func TestTooltipsAndFormatting(t *testing.T) {
 	summary := QuoteSummary(hkSnap)
 	if summary != "恒指 23211.81 +0.51% | 恒科 3857.53 -0.36%!" {
 		t.Fatalf("unexpected HK QuoteSummary: %q", summary)
+	}
+}
+
+func TestLatencyDoesNotUseTunnelHeartbeat(t *testing.T) {
+	now := time.Now()
+	measured := monitor.Latency{
+		RTT: 245 * time.Millisecond, Target: "https://www.cloudflare.com/cdn-cgi/trace",
+		Method: "https", At: now,
+	}
+	for _, tc := range []struct {
+		name    string
+		latency monitor.Latency
+		want    string
+	}{
+		{"measured_https", measured, "245ms"},
+		{"no_measurement", monitor.Latency{}, "--"},
+		{"request_failed", monitor.Latency{Method: "https", Target: measured.Target, At: now, Error: "timeout"}, "--"},
+		{"expired", monitor.Latency{Method: "https", Target: measured.Target, At: now.Add(-monitor.LatencyMaxAge - time.Second), RTT: measured.RTT}, "--"},
+		{"tcp_is_not_https", monitor.Latency{Method: "tcp", Target: measured.Target, At: now, RTT: time.Millisecond}, "--"},
+		{"sub_millisecond_precision", monitor.Latency{Method: "https", Target: measured.Target, At: now, RTT: 700 * time.Microsecond}, "<1ms"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := app.Snapshot{
+				Status: monitor.Online, EgressActive: true, Geo: ipinfo.Info{Country: "KR"},
+				Probe:   monitor.Probe{Success: true, Method: "icmp", RTT: time.Millisecond},
+				Latency: tc.latency,
+			}
+			if got := CompactRTT(s); got != tc.want {
+				t.Fatalf("KR/TUN heartbeat=1ms, HTTPS=%+v: displayed %q; want %q", tc.latency, got, tc.want)
+			}
+		})
 	}
 }

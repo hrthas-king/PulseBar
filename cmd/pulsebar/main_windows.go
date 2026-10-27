@@ -115,13 +115,14 @@ func run(diagnose, runFor time.Duration, output string, probe, dockLeft, showDia
 	defer cancel()
 
 	engine := app.New(app.Dependencies{
-		ReadCounters:  network.ReadCounters,
-		Ping:          pinger.Ping,
-		FetchGeo:      ipinfo.Fetch,
-		FetchQuotes:   market.Fetch,
-		NetworkEvents: watcher.Events,
-		EgressEvents:  network.WatchEgress(ctx),
-		WatchError:    watchError,
+		ReadCounters:   network.ReadCounters,
+		Ping:           pinger.Ping,
+		MeasureLatency: network.MeasureHTTPSLatency,
+		FetchGeo:       ipinfo.Fetch,
+		FetchQuotes:    market.Fetch,
+		NetworkEvents:  watcher.Events,
+		EgressEvents:   network.WatchEgress(ctx),
+		WatchError:     watchError,
 	})
 
 	var latest atomic.Pointer[app.Snapshot]

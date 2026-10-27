@@ -24,10 +24,27 @@ const (
 type Probe struct {
 	Success bool          `json:"success"`
 	Uplink  Uplink        `json:"uplink"`
+	Method  string        `json:"method,omitempty"`
 	RTT     time.Duration `json:"rtt_ns"`
 	Target  string        `json:"target"`
 	Detail  string        `json:"detail,omitempty"`
 	At      time.Time     `json:"at"`
+}
+
+const LatencyMaxAge = 15 * time.Second
+
+// Latency is an HTTPS request/response measurement, independent of connectivity evidence.
+type Latency struct {
+	RTT    time.Duration `json:"rtt_ns"`
+	Target string        `json:"target"`
+	Method string        `json:"method"`
+	At     time.Time     `json:"at"`
+	Error  string        `json:"error,omitempty"`
+}
+
+func (l Latency) Valid(now time.Time) bool {
+	return l.Method == "https" && l.Target != "" && l.Error == "" && l.RTT > 0 &&
+		!l.At.IsZero() && !now.Before(l.At) && now.Sub(l.At) <= LatencyMaxAge
 }
 
 type Tracker struct {

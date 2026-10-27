@@ -11,13 +11,13 @@
 
 **合二为一的极轻量 Windows 任务栏网络脉搏（GeoPulse）与 VOO / QQQ 24小时全时段实时行情条（TickBar）。**
 
-当前版本：**v0.5.1（2026-10-27）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.5.1)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
+当前版本：**v0.5.2（2026-10-27）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.5.2)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
 
 双击单个 `~3.3 MiB`（amd64 本地构建）的 `.exe` 即可静默运行，同时在 **任务栏最左侧悬浮条** 与 **系统托盘** 展示：
-1. **GeoPulse 秒级网络感知**：公网出口两位国家代码、连通性状态灯（绿/黄/红）、上下行实时流量活动箭头（或一键展开实时网速与 ICMP RTT）、TUN/系统代理节点切换自动感知。
+1. **GeoPulse 秒级网络感知**：公网出口两位国家代码、连通性状态灯（绿/黄/红）、上下行实时流量活动箭头（或一键展开实时网速与 HTTPS 请求延迟）、TUN/系统代理节点切换自动感知。
 2. **TickBar VOO / QQQ 24×5 全时段无缝实时行情**：追踪 `VOO`（标普 500 ETF）与 `QQQ`（纳斯达克 100 ETF），无缝覆盖美东时间周日 20:00 至周五 20:00 的 **夜盘（Overnight）+ 盘前（Pre-Market）+ 盘中（Regular）+ 盘后（Post-Market）** 24 小时连续实时价格流与日涨跌幅。
 
-纯 Go 标准库直接调用 Win32 GDI、Shell_NotifyIcon、IP Helper 与 WinHTTP 系统 API；无 CGo、无 Python 解释器打包、无 Electron/WebView，运行期第三方依赖为零。v0.2.0 曾测得 GUI 私有工作集约 **4.41 MiB**；v0.5.1 的 GUI 内存与真实行情延迟仍待重新实测，详见 [验证记录](docs/VALIDATION.md)。
+纯 Go 标准库直接调用 Win32 GDI、Shell_NotifyIcon、IP Helper 与 WinHTTP 系统 API；无 CGo、无 Python 解释器打包、无 Electron/WebView，运行期第三方依赖为零。v0.5.2 的一次 10 秒 GUI 实测私有工作集约 **6.09 MiB**；完整资源记录及真实行情延迟的待验证范围详见 [验证记录](docs/VALIDATION.md)。
 
 ---
 
@@ -27,7 +27,8 @@
 - **紧凑模式（默认）**：`[● US ↑↓ | ● VOO 699.48 +0.13% | ● QQQ 704.35 -0.01%]`
   - 左侧显示出口国家代码、连通状态圆点与随流量亮起的上下行箭头；右侧同屏显示 `VOO` 与 `QQQ` 的 24h 实时成交价与当前时段涨跌幅（每 `$0.01` 跳动即刻可见）。
 - **详细网速模式（右键菜单一键切换）**：`[● US ↑12K ↓1.5M 18ms | ● VOO 699.48 +0.13% | ● QQQ 704.35 -0.01%]`
-  - 在任务栏悬浮条上直接展开实时上行速率、下行速率与 ICMP 延迟。
+  - 在任务栏悬浮条上直接展开实时上行速率、下行速率与 HTTPS 请求延迟。
+  - 延迟每 **5 秒**独立测量一次，目标为 `https://www.cloudflare.com/cdn-cgi/trace`，跟随系统代理/TUN；数值包含 DNS、建连、TLS 与响应头耗时。失败、超过 **15 秒**未更新或正在切换出口时显示 `--`，详细提示中标明测量目标。连通状态由心跳与通信证据单独判断。
 - **系统托盘动态图标**：32×32 像素级实时绘制两位国家代码、状态点与上下行闪烁箭头。当悬浮条开启**锁定穿透**时，仍可通过悬停或右键系统托盘查看完整信息。
 - **交互与布局**：
   - 默认停靠在主屏幕任务栏最左侧（边距 8 逻辑像素，支持高 DPI 自动缩放）。
@@ -60,7 +61,7 @@
 
 ### 3. 秒级网络感知与代理节点切换检测 (GeoPulse 内核)
 - **64 位出口网卡计数**：通过 `GetBestInterface` + `GetIfEntry2` 每秒读取当前有效路由出口网卡字节计数，避免物理网卡与 VPN 虚拟网卡重复统计。
-- **极低开销多层防抖探针（ICMP + TCP 443 兜底 + 流量旁路证明）**：优先发送 32 字节 `IcmpSendEcho`，若主目标失败立即同周期复核备用目标（`1.1.1.1` / `8.8.8.8`）；若 TUN/代理节点丢弃三层 ICMP，自动通过轻量 TCP 443 握手兜底并结合实时下行流量/HTTPS 成功通信作为旁路在线证明，杜绝 TUN 模式下误报断网闪烁。
+- **极低开销多层防抖探针（ICMP + TCP 443 兜底 + 流量旁路证明）**：优先发送 32 字节 `IcmpSendEcho`，若主目标失败立即同周期复核备用目标（`1.1.1.1` / `8.8.8.8`）；若 TUN/代理节点丢弃三层 ICMP，通过 TCP 443 握手与实时下行流量/HTTPS 成功通信辅助判断连通性。悬浮条延迟来自独立的 HTTPS 测量，避免把 TUN 的本地回包或握手显示成外网请求延迟。
 - **TUN / 代理出口感知**：同时监听系统路由/地址变更事件与本地代理内核（`mihomo`、`sing-box`、`xray`、`clash` 等）连接端点指纹，节点切换后自动复核 Cloudflare `/cdn-cgi/trace`。
 
 ---
@@ -73,11 +74,11 @@
 git clone https://github.com/hrthas-king/PulseBar.git
 cd PulseBar
 ./scripts/verify.ps1
-./scripts/build.ps1 -Arch amd64 -Version v0.5.1
+./scripts/build.ps1 -Arch amd64 -Version v0.5.2
 ./dist/PulseBar-windows-amd64.exe
 ```
 
-`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.5.1`。如需更新本机根目录运行副本：
+`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.5.2`。如需更新本机根目录运行副本：
 
 ```powershell
 Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
@@ -106,7 +107,7 @@ Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
 
 ```powershell
 ./scripts/generate-icons.ps1
-./scripts/package.ps1 -Version v0.5.1
+./scripts/package.ps1 -Version v0.5.2
 ```
 
 ---
@@ -118,12 +119,12 @@ PulseBar/
 ├── assets/                         # 现代应用图标 PNG、多尺寸 ICO 与 winres 配置
 ├── cmd/pulsebar/                   # 入口与双架构 Windows 图标资源 (.syso)
 ├── internal/
-│   ├── app/                        # 四线并发调度（网卡采样、心跳、定位、VOO/QQQ 行情）
+│   ├── app/                        # 独立调度网卡、心跳、HTTPS 延迟、出口定位与行情
 │   ├── config/                     # 持久化配置 (%LOCALAPPDATA%\PulseBar\config.json)
 │   ├── ipinfo/                     # WinHTTP Cloudflare trace 查询与解析
 │   ├── market/                     # WinHTTP VOO/QQQ 24h 全时段实时行情抓取与校验
 │   ├── monitor/                    # 连通性状态机与 64 位速率计算
-│   ├── network/                    # ICMP、NIC 计数、路由事件与本地 TUN/代理指纹
+│   ├── network/                    # ICMP、HTTPS 延迟、NIC 计数、路由与代理指纹
 │   ├── startup/                    # HKCU\...\Run\PulseBar 注册表自启管理
 │   ├── ui/                         # GDI 分层任务栏悬浮条、系统托盘、动态图标与菜单
 │   └── winapi/                     # 系统 DLL 安全加载、单实例互斥与内存统计

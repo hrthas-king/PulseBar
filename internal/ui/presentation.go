@@ -66,23 +66,17 @@ func CompactSpeed(bytes float64) string {
 }
 
 func RTT(s app.Snapshot) string {
-	if !s.Probe.Success {
+	if s.Status == monitor.Offline || !s.Latency.Valid(time.Now()) {
 		return "--"
 	}
-	if s.Probe.RTT < time.Millisecond {
+	if s.Latency.RTT < time.Millisecond {
 		return "<1 ms"
 	}
-	return fmt.Sprintf("%d ms", s.Probe.RTT.Milliseconds())
+	return fmt.Sprintf("%d ms", s.Latency.RTT.Milliseconds())
 }
 
 func CompactRTT(s app.Snapshot) string {
-	if !s.Probe.Success {
-		return "--"
-	}
-	if s.Probe.RTT < time.Millisecond {
-		return "<1ms"
-	}
-	return fmt.Sprintf("%dms", s.Probe.RTT.Milliseconds())
+	return strings.ReplaceAll(RTT(s), " ", "")
 }
 
 func QuoteSummary(s app.Snapshot) string {
@@ -123,7 +117,7 @@ func TrayTooltip(s app.Snapshot) string {
 	if s.Rates.Valid {
 		up, down = CompactSpeed(s.Rates.Up), CompactSpeed(s.Rates.Down)
 	}
-	return fmt.Sprintf("PulseBar [%s] %s\nIP: %s | RTT: %s\n↑%s ↓%s\n%s",
+	return fmt.Sprintf("PulseBar [%s] %s\nIP: %s | HTTPS: %s\n↑%s ↓%s\n%s",
 		Country(s), StatusText(s.Status), ip, CompactRTT(s), up, down, QuoteSummary(s))
 }
 
@@ -152,7 +146,11 @@ func OverlayTooltip(s app.Snapshot) string {
 	}
 	var lines []string
 	lines = append(lines, fmt.Sprintf("【网络】[%s] %s | IP: %s | 网卡: %s", Country(s), StatusText(s.Status), ip, nic))
-	lines = append(lines, fmt.Sprintf("  速率: ↑ %s  ↓ %s | RTT: %s (%s)", up, down, RTT(s), evidence))
+	lines = append(lines, fmt.Sprintf("  速率: ↑ %s  ↓ %s | HTTPS 延迟: %s (%s)", up, down, RTT(s), evidence))
+	lines = append(lines, fmt.Sprintf("  延迟目标: %s | 每 %.0f 秒采样（含建连与 TLS）", valueOr(s.Latency.Target, "等待测量"), app.LatencyPoll.Seconds()))
+	if s.Latency.Error != "" {
+		lines = append(lines, "  延迟测量提示: "+s.Latency.Error)
+	}
 	if s.EgressActive {
 		lines = append(lines, "  模式: 检测到 TUN / 系统代理活跃（30s 自动复核出口）")
 	}
@@ -178,7 +176,14 @@ func DiagnosticsText(version string, s app.Snapshot) string {
 		up, down = Speed(s.Rates.Up), Speed(s.Rates.Down)
 	}
 	fmt.Fprintf(&b, "  实时速率: ↑ %s | ↓ %s\n", up, down)
-	fmt.Fprintf(&b, "  ICMP探针: 目标 %s | RTT %s | 上行证据 %s\n", valueOr(s.Probe.Target, "1.1.1.1"), RTT(s), s.Probe.Uplink)
+	fmt.Fprintf(&b, "  连通性探针: %s | 目标 %s | 上行证据 %s\n", valueOr(s.Probe.Method, "未知"), valueOr(s.Probe.Target, "1.1.1.1"), s.Probe.Uplink)
+	fmt.Fprintf(&b, "  HTTPS 请求延迟: %s | 目标 %s | 每 %.0f 秒采样（含 DNS、建连、TLS、响应头）\n", RTT(s), valueOr(s.Latency.Target, "等待测量"), app.LatencyPoll.Seconds())
+	if !s.Latency.At.IsZero() {
+		fmt.Fprintf(&b, "  延迟采样时间 (UTC): %s\n", s.Latency.At.UTC().Format(time.RFC3339))
+	}
+	if s.Latency.Error != "" {
+		fmt.Fprintf(&b, "  延迟测量提示: %s\n", s.Latency.Error)
+	}
 	if s.GeoError != "" {
 		fmt.Fprintf(&b, "  定位提示: %s\n", s.GeoError)
 	}

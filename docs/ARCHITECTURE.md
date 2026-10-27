@@ -4,10 +4,12 @@
 flowchart LR
     NIC["GetBestInterface + GetIfEntry2\n每秒读取 64 位出口计数"] --> Samples["采样通道"]
     ICMP["IcmpSendEcho\n32 字节 payload / 每秒一包"] --> Probes["探针通道"]
+    HTTPS["独立 WinHTTP HTTPS GET\n每 5 秒采样 / 新连接"] --> Latency["延迟结果 + 出口代次"]
     Events["NotifyIpInterfaceChange\nNotifyUnicastIpAddressChange\nNotifyRouteChange2"] --> Debounce["事件信号 / 去抖 / 网络代次"]
     Egress["WatchEgress\n本地 TUN / 代理端点指纹"] --> Debounce
     Samples --> Engine["单 goroutine 状态聚合引擎"]
     Probes --> Engine
+    Latency --> Engine
     Debounce --> Engine
     Menu["悬浮条 / 托盘菜单命令"] --> Engine
     Engine --> GeoGate["冷却限流 / 网络代次校验"]
@@ -28,12 +30,17 @@ flowchart LR
    - 不在 UI 线程执行任何 ICMP、WinHTTP、注册表或磁盘写入。
 2. **固定 1 秒网络心跳与网卡采样 (`internal/network` + `internal/monitor`)**：
    - `GetBestInterface` + `GetIfEntry2` 仅统计当前路由出口网卡的 64 位累计字节，避免物理网卡与 VPN 虚拟接口重复计数。
-   - `IcmpSendEcho` 每秒发送单个 32 字节探测包（650ms 超时），失败下一秒切换 `1.1.1.1` / `8.8.8.8`，单次失败转黄色待确认（`Degraded`），连续两次失败转红色断网（`Offline`），一次成功即恢复绿色（`Online`）。
-3. **事件驱动公网 IP 与国家定位 (`internal/ipinfo` + `internal/network/egress_windows.go`)**：
+   - 每秒对 `1.1.1.1` / `8.8.8.8` 发起 ICMP 心跳；主目标失败时同周期复核备用目标，必要时通过 TCP 443 和最近 HTTPS 通信/流量作连通性旁证。
+   - 已在线时单次失败保持绿色；连续 2～3 次失败进入 `Degraded`，连续 4 次失败进入 `Offline`，一次成功恢复 `Online`。旁证只参与连通判断，不生成或沿用延迟数值。
+3. **独立 HTTPS 延迟 (`internal/network/latency_windows.go`)**：
+   - 每 5 秒以新 WinHTTP 连接请求 `https://www.cloudflare.com/cdn-cgi/trace`，继承系统代理与 TLS 验证；计时从发送前到收到响应头，包含 DNS、建连和 TLS。
+   - `Snapshot.Probe` 保存连通性证据；`Snapshot.Latency` 单独保存 HTTPS 耗时、目标、方法、采样时间和错误。UI 仅展示新鲜有效的 HTTPS 延迟。
+   - 出口/路由变化或手动刷新时递增独立延迟代次，取消旧请求并立即重测；迟到的旧代次结果不允许覆盖新出口。失败或超过 15 秒未更新时显示 `--`。
+4. **事件驱动公网 IP 与国家定位 (`internal/ipinfo` + `internal/network/egress_windows.go`)**：
    - 监听系统网卡、IP 地址、路由变更通知，750ms 事件去抖。
    - 每秒本地检测系统代理、TUN 网卡与常见代理内核（`mihomo`、`sing-box`、`xray`、`clash` 等）的远端连接指纹，连续稳定 2 秒后触发复核。
    - 使用 WinHTTP 请求 `https://www.cloudflare.com/cdn-cgi/trace`，自动继承系统代理与系统 TLS 根证书，禁用 Keep-Alive 确保探测新节点出口。
-4. **VOO / QQQ 24×5 全时段无缝实时行情 (`internal/market`)**：
-   - 后台通过 WinHTTP 读取 `query1.finance.yahoo.com`（备用 `query2.finance.yahoo.com`）的 `/v8/finance/chart/{VOO|QQQ}?interval=1d&range=1d&includePrePost=true` 轻量端点（单标的仅 ~1.3 KB），并在同一轮询周期复用连接句柄降低 TLS 握手开销。
-   - 优先解析覆盖美东时间周日 20:00 至周五 20:00 全天 24 小时（**夜盘 Overnight 20:00–04:00 + 盘前 Pre-Market 04:00–09:30 + 盘中 Regular 09:30–16:00 + 盘后 Post-Market 16:00–20:00**）的 `fulldayPrice` / `fulldayChange` / `fulldayChangePercent` 实时字段。
-   - 独立校验 `VOO` 与 `QQQ` 的 `ETF` 类型、`USD` 币种、有限数值及最新价与涨跌额/涨跌幅一致性（容差 `rel_tol=1e-6, abs_tol=0.025`），看门狗超时或请求失败立即亮红灯并按指数退避（HTTP 401/403/429 退避 60 秒）。
+5. **全球多市场行情 (`internal/market`)**：
+   - 支持 8 组标的。腾讯查询映射覆盖 A股、港股、日韩、欧洲及黄金/布油；其余或腾讯请求失败时使用 Yahoo v7，再回退到 v8。
+   - 美股扩展时段读取夜盘、盘前、盘后等对应价格与成交时间；独立解析标的并校验资产类型、币种、有限数值和涨跌幅一致性。
+   - 行情采用独立轮询、失败退避、缓存与过期判断；行情请求耗时不会充当网络延迟。

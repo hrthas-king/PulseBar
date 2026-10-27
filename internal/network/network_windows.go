@@ -156,7 +156,7 @@ func (p *Pinger) Ping(target string) monitor.Probe {
 }
 
 func (p *Pinger) pingICMP(target string, timeoutMs uintptr) monitor.Probe {
-	result := monitor.Probe{Target: target, Uplink: monitor.UplinkUnknown}
+	result := monitor.Probe{Target: target, Method: "icmp", Uplink: monitor.UplinkUnknown}
 	ip, err := ipv4(target)
 	if err != nil {
 		result.Uplink = monitor.UplinkLocalError
@@ -192,9 +192,6 @@ func (p *Pinger) pingICMP(target string, timeoutMs uintptr) monitor.Probe {
 	result.Success = true
 	result.Uplink = monitor.UplinkConfirmed
 	rttMs := words[2]
-	if rttMs == 0 {
-		rttMs = 1
-	}
 	result.RTT = time.Duration(rttMs) * time.Millisecond
 	return result
 }
@@ -210,6 +207,7 @@ func probeTCP443(primary, secondary string, timeout time.Duration) (monitor.Prob
 		if rtt, ok := dialTCP443(ip, timeout); ok {
 			return monitor.Probe{
 				Success: true,
+				Method:  "tcp",
 				Uplink:  monitor.UplinkConfirmed,
 				RTT:     rtt,
 				Target:  host,
@@ -244,9 +242,6 @@ func dialTCP443(ipv4LE uint32, timeout time.Duration) (time.Duration, bool) {
 	rc, _, _ := wsaConnect.Call(s, uintptr(unsafe.Pointer(&sa)), 16)
 	if int32(rc) == 0 {
 		rtt := time.Since(start)
-		if rtt < time.Millisecond {
-			rtt = time.Millisecond
-		}
 		return rtt, true
 	}
 
@@ -269,9 +264,6 @@ func dialTCP443(ipv4LE uint32, timeout time.Duration) (time.Duration, bool) {
 	n, _, _ := wsaSelect.Call(0, 0, uintptr(unsafe.Pointer(&writeSet)), 0, uintptr(unsafe.Pointer(&tv)))
 	if int32(n) > 0 {
 		rtt := time.Since(start)
-		if rtt < time.Millisecond {
-			rtt = time.Millisecond
-		}
 		return rtt, true
 	}
 	return 0, false

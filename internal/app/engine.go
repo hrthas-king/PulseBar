@@ -1,4 +1,4 @@
-// Package app 统一调度四条互不阻塞的工作线：网卡计数采样、ICMP 心跳、事件驱动 IP 定位与多市场行情轮询。
+// Package app 独立调度网卡计数、连通性心跳、HTTPS 延迟、出口定位和行情轮询。
 package app
 
 import (
@@ -16,6 +16,7 @@ import (
 
 const (
 	Heartbeat         = time.Second
+	LatencyPoll       = 5 * time.Second
 	GeoPoll           = 15 * time.Minute
 	GeoCooldown       = 30 * time.Second
 	GeoManualCooldown = 2 * time.Second
@@ -24,31 +25,33 @@ const (
 )
 
 type Snapshot struct {
-	Status          monitor.Status `json:"status"`
-	Failures        int            `json:"consecutive_failures"`
-	Rates           monitor.Rates  `json:"rates"`
-	Probe           monitor.Probe  `json:"probe"`
-	Geo             ipinfo.Info    `json:"geo"`
-	GeoRefreshing   bool           `json:"geo_refreshing"`
-	GeoError        string         `json:"geo_error,omitempty"`
-	NIC             string         `json:"nic"`
-	NICError        string         `json:"nic_error,omitempty"`
-	WatchError      string         `json:"watch_error,omitempty"`
-	IntervalSeconds int            `json:"display_interval_seconds"`
-	MarketGroup     string         `json:"market_group"`
-	EgressActive    bool           `json:"tun_or_proxy_active"`
-	Quotes          []market.View  `json:"quotes"`
-	At              time.Time      `json:"at"`
+	Status          monitor.Status  `json:"status"`
+	Failures        int             `json:"consecutive_failures"`
+	Rates           monitor.Rates   `json:"rates"`
+	Probe           monitor.Probe   `json:"probe"`
+	Latency         monitor.Latency `json:"latency"`
+	Geo             ipinfo.Info     `json:"geo"`
+	GeoRefreshing   bool            `json:"geo_refreshing"`
+	GeoError        string          `json:"geo_error,omitempty"`
+	NIC             string          `json:"nic"`
+	NICError        string          `json:"nic_error,omitempty"`
+	WatchError      string          `json:"watch_error,omitempty"`
+	IntervalSeconds int             `json:"display_interval_seconds"`
+	MarketGroup     string          `json:"market_group"`
+	EgressActive    bool            `json:"tun_or_proxy_active"`
+	Quotes          []market.View   `json:"quotes"`
+	At              time.Time       `json:"at"`
 }
 
 type Dependencies struct {
-	ReadCounters  func(string) (monitor.Counters, error)
-	Ping          func(string) monitor.Probe
-	FetchGeo      func(context.Context) (ipinfo.Info, error)
-	FetchQuotes   func(context.Context) (map[string]market.SymbolResult, error)
-	NetworkEvents <-chan struct{}
-	EgressEvents  <-chan monitor.EgressEvent
-	WatchError    string
+	ReadCounters   func(string) (monitor.Counters, error)
+	Ping           func(string) monitor.Probe
+	MeasureLatency func(context.Context) monitor.Latency
+	FetchGeo       func(context.Context) (ipinfo.Info, error)
+	FetchQuotes    func(context.Context) (map[string]market.SymbolResult, error)
+	NetworkEvents  <-chan struct{}
+	EgressEvents   <-chan monitor.EgressEvent
+	WatchError     string
 }
 
 type Engine struct {
@@ -105,6 +108,11 @@ type probeResult struct {
 	epoch uint64
 }
 
+type latencyResult struct {
+	value monitor.Latency
+	epoch uint64
+}
+
 type geoResult struct {
 	value ipinfo.Info
 	err   error
@@ -127,6 +135,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 	}
 	counters := make(chan counterResult, 1)
 	probes := make(chan probeResult, 1)
+	latencies := make(chan latencyResult, 1)
 	geos := make(chan geoResult, 1)
 	quotesCh := make(chan quoteResult, 1)
 
@@ -201,6 +210,8 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 	}
 	display := time.NewTicker(time.Duration(seconds) * time.Second)
 	defer display.Stop()
+	latencyTicker := time.NewTicker(LatencyPoll)
+	defer latencyTicker.Stop()
 	poll := time.NewTicker(GeoPoll)
 	defer poll.Stop()
 	tunnelPoll := time.NewTicker(e.tunnelPoll)
@@ -222,6 +233,9 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 	var quoteNextTry time.Time
 	var quoteCancel context.CancelFunc
 	var lastHTTPSuccessAt time.Time
+	var latencyBusy bool
+	var latencyEpoch uint64
+	var latencyCancel context.CancelFunc
 
 	defer func() {
 		if refreshTimer != nil {
@@ -232,6 +246,9 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 		}
 		if quoteCancel != nil {
 			quoteCancel()
+		}
+		if latencyCancel != nil {
+			latencyCancel()
 		}
 	}()
 
@@ -293,9 +310,40 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 		}()
 	}
 
+	triggerLatency := func() {
+		if e.deps.MeasureLatency == nil || latencyBusy {
+			return
+		}
+		latencyBusy = true
+		ep := latencyEpoch
+		lCtx, stop := context.WithTimeout(ctx, 4*time.Second)
+		latencyCancel = stop
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			defer stop()
+			value := e.deps.MeasureLatency(lCtx)
+			select {
+			case latencies <- latencyResult{value, ep}:
+			case <-ctx.Done():
+			}
+		}()
+	}
+	invalidateLatency := func() {
+		latencyEpoch++
+		if latencyCancel != nil {
+			latencyCancel()
+			latencyCancel = nil
+		}
+		latencyBusy = false
+		snapshot.Latency = monitor.Latency{}
+		triggerLatency()
+	}
+
 	emit()
 	requestGeo()
 	triggerQuoteFetch(true)
+	triggerLatency()
 
 	for {
 		select {
@@ -327,9 +375,8 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 				if activeDown || recentHTTP {
 					probeVal.Success = true
 					probeVal.Uplink = monitor.UplinkConfirmed
-					if probeVal.RTT <= 0 && snapshot.Probe.RTT > 0 {
-						probeVal.RTT = snapshot.Probe.RTT
-					}
+					probeVal.Method = "evidence"
+					probeVal.RTT = 0
 				}
 			}
 			previous := tracker.Status
@@ -344,7 +391,24 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 				emit()
 				armGeo()
 			}
+		case r := <-latencies:
+			if r.epoch != latencyEpoch {
+				continue
+			}
+			latencyBusy = false
+			if latencyCancel != nil {
+				latencyCancel()
+				latencyCancel = nil
+			}
+			snapshot.Latency = r.value
+			if r.value.Valid(time.Now()) {
+				lastHTTPSuccessAt = time.Now()
+			}
+			emit()
+		case <-latencyTicker.C:
+			triggerLatency()
 		case <-e.deps.NetworkEvents:
+			invalidateLatency()
 			// 层 4：收到系统路由或 IPv6 临时地址变动通知时，若当前已在线，平滑保持当前状态与国家码，仅后台静默复核出口
 			if tracker.Status != monitor.Online {
 				generation.Add(1)
@@ -359,6 +423,9 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 			triggerQuoteFetch(true)
 			emit()
 		case event := <-e.deps.EgressEvents:
+			if event.Changed || snapshot.EgressActive != event.Active {
+				invalidateLatency()
+			}
 			snapshot.EgressActive = event.Active
 			if event.Changed {
 				debounceUntil = time.Now().Add(EventDebounce)
@@ -368,6 +435,7 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 			}
 			emit()
 		case <-e.Refresh:
+			invalidateLatency()
 			geoGeneration++
 			snapshot.Geo = ipinfo.Info{}
 			snapshot.GeoError = ""

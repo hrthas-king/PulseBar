@@ -251,9 +251,68 @@ func TestTencentQueryForSymbols(t *testing.T) {
 		t.Fatalf("unexpected Gold/Oil query: %q, ok=%v", qGoldOil, okGoldOil)
 	}
 
+	qAsia, okAsia := TencentQueryForSymbols([]string{"^N225", "^KS11"})
+	if !okAsia || qAsia != "gzN225,gzKS11" {
+		t.Fatalf("unexpected Asia query: %q, ok=%v", qAsia, okAsia)
+	}
+
+	qEU, okEU := TencentQueryForSymbols([]string{"^FCHI", "^GDAXI"})
+	if !okEU || qEU != "gzFCHI,gzGDAXI" {
+		t.Fatalf("unexpected EU query: %q, ok=%v", qEU, okEU)
+	}
+
 	_, okUS := TencentQueryForSymbols([]string{"VOO", "QQQ"})
 	if okUS {
 		t.Fatalf("expected VOO/QQQ to not match Tencent query")
+	}
+}
+
+func TestParseTencentQuoteBatch_AsiaIndices(t *testing.T) {
+	raw := []byte("v_gzN225=\"N225~日经225指数~2026-10-27 14:25:26~63254.28~1064.63~1.71~AP~\";\r\n" +
+		"v_gzKS11=\"KS11~韩国首尔综合~2026-10-27 14:20:00~5626.49~157.02~2.87~AP~\";\r\n")
+	syms := []string{"^N225", "^KS11"}
+
+	// Tuesday 10:00 JST/KST (01:00 UTC) -> Regular trading for both
+	tuesdayMorning := time.Date(2026, 10, 27, 1, 0, 0, 0, time.UTC)
+	batch, err := ParseTencentQuoteBatch(syms, raw, 60.0, tuesdayMorning)
+	if err != nil {
+		t.Fatalf("unexpected Asia parse error: %v", err)
+	}
+	n225 := batch["^N225"].Quote
+	ks11 := batch["^KS11"].Quote
+	if n225 == nil || ks11 == nil {
+		t.Fatalf("expected both Asia quotes: %+v", batch)
+	}
+	if n225.Price != 63254.28 || n225.Alias != "日经" || n225.Currency != "JPY" || n225.State != StateRegular {
+		t.Fatalf("unexpected Nikkei quote: %+v", n225)
+	}
+	if ks11.Price != 5626.49 || ks11.Alias != "韩指" || ks11.Currency != "KRW" || ks11.State != StateRegular {
+		t.Fatalf("unexpected KOSPI quote: %+v", ks11)
+	}
+
+	// Tuesday 12:00 JST (03:00 UTC) -> Tokyo lunch break (StateClosed), Seoul still trading (StateRegular)
+	tuesdayLunch := time.Date(2026, 10, 27, 3, 0, 0, 0, time.UTC)
+	batchLunch, err := ParseTencentQuoteBatch(syms, raw, 60.0, tuesdayLunch)
+	if err != nil {
+		t.Fatalf("unexpected lunch batch error: %v", err)
+	}
+	if batchLunch["^N225"].Quote.State != StateClosed || batchLunch["^N225"].Quote.Session != "午间休市 (Lunch Break)" {
+		t.Fatalf("expected Nikkei at 12:00 JST to be lunch break StateClosed, got %v (%s)",
+			batchLunch["^N225"].Quote.State, batchLunch["^N225"].Quote.Session)
+	}
+	if batchLunch["^KS11"].Quote.State != StateRegular {
+		t.Fatalf("expected KOSPI at 12:00 KST to be StateRegular, got %v", batchLunch["^KS11"].Quote.State)
+	}
+
+	// Tuesday 16:00 JST (07:00 UTC) -> Post-market close for both (StateClosed)
+	tuesdayAfterClose := time.Date(2026, 10, 27, 7, 0, 0, 0, time.UTC)
+	batchClose, err := ParseTencentQuoteBatch(syms, raw, 60.0, tuesdayAfterClose)
+	if err != nil {
+		t.Fatalf("unexpected close batch error: %v", err)
+	}
+	if batchClose["^N225"].Quote.State != StateClosed || batchClose["^KS11"].Quote.State != StateClosed {
+		t.Fatalf("expected both closed after 15:30, got %v / %v",
+			batchClose["^N225"].Quote.State, batchClose["^KS11"].Quote.State)
 	}
 }
 

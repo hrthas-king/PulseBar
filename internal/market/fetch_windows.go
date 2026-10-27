@@ -121,6 +121,15 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 		return nil, err
 	}
 
+	// 1. 若当前标的分组支持腾讯 0 秒级实时接口 (A股/港股/黄金原油)，优先调用以消除 15~20 分钟延迟
+	if tQuery, ok := TencentQueryForSymbols(syms); ok {
+		tBatch, tErr := fetchTencentRealtimeLocked(ctx, session, syms, tQuery)
+		if tErr == nil {
+			return tBatch, nil
+		}
+	}
+
+	// 2. 国际市场或腾讯备用时，调用 Yahoo Finance v7
 	batch, err := fetchV7OvernightLocked(ctx, session, syms)
 	if err == nil {
 		return batch, nil
@@ -134,6 +143,20 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 	fbCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	return fetchV8FallbackLocked(fbCtx, fbSession, syms, err)
+}
+
+func fetchTencentRealtimeLocked(ctx context.Context, session uintptr, syms []string, query string) (map[string]SymbolResult, error) {
+	path := "/q=" + query
+	start := time.Now()
+	status, body, err := doHTTPGet(ctx, session, TencentHost, path, false)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, HTTPError{StatusCode: status}
+	}
+	rttMs := float64(time.Since(start).Microseconds()) / 1000.0
+	return ParseTencentQuoteBatch(syms, body, rttMs, time.Now())
 }
 
 func fetchV7OvernightLocked(ctx context.Context, session uintptr, syms []string) (map[string]SymbolResult, error) {

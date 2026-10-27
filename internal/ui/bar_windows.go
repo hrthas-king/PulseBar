@@ -30,6 +30,7 @@ const (
 	ActionGroupVOOQQQ
 	ActionGroupSOXXSMH
 	ActionGroupTop2US
+	ActionGroupGoldOil
 	ActionGroupCNIndices
 	ActionGroupHKIndices
 	ActionGroupAsiaIndices

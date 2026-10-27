@@ -35,4 +35,11 @@ func TestConfigRoundTrip(t *testing.T) {
 		loaded.Placement != "manual" || loaded.X == nil || *loaded.X != 120 || *loaded.Y != 1040 {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
 	}
+
+	if !ValidMarketGroup("gold_oil") {
+		t.Fatalf("expected gold_oil to be valid market group")
+	}
+	if ValidMarketGroup("invalid_group") {
+		t.Fatalf("expected invalid_group to be invalid")
+	}
 }

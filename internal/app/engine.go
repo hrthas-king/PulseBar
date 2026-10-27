@@ -76,8 +76,8 @@ func ValidInterval(seconds int) bool {
 }
 
 func QuotePollInterval(displaySeconds int) int {
-	if displaySeconds < 2 {
-		return 2
+	if displaySeconds < 1 {
+		return 1
 	}
 	return displaySeconds
 }

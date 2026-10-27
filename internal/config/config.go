@@ -19,6 +19,7 @@ var validMarketGroups = map[string]bool{
 	"voo_qqq":      true,
 	"soxx_smh":     true,
 	"top2_us":      true,
+	"gold_oil":     true,
 	"cn_indices":   true,
 	"hk_indices":   true,
 	"asia_indices": true,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ const (
 	MaxBody       = 32768
 	PrimaryHost   = "query1.finance.yahoo.com"
 	FallbackHost  = "query2.finance.yahoo.com"
+	TencentHost   = "qt.gtimg.cn"
 	CookieHost    = "fc.yahoo.com"
 	TimeoutMillis = 1500
 )
@@ -22,6 +24,7 @@ const (
 	GroupVOOQQQ      = "voo_qqq"
 	GroupSOXXSMH     = "soxx_smh"
 	GroupTop2US      = "top2_us"
+	GroupGoldOil     = "gold_oil"
 	GroupCNIndices   = "cn_indices"
 	GroupHKIndices   = "hk_indices"
 	GroupAsiaIndices = "asia_indices"
@@ -66,6 +69,7 @@ var Groups = []GroupSpec{
 	{ID: GroupVOOQQQ, MenuLabel: "标普 / 纳指 (VOO / QQQ)", Symbols: []string{"VOO", "QQQ"}},
 	{ID: GroupSOXXSMH, MenuLabel: "半导体 ETF (SOXX / SMH)", Symbols: []string{"SOXX", "SMH"}},
 	{ID: GroupTop2US, MenuLabel: "美股市值前二 (NVDA / MSFT)", Symbols: []string{"NVDA", "MSFT"}},
+	{ID: GroupGoldOil, MenuLabel: "黄金 / 布伦特原油 (GC / BZ)", Symbols: []string{"GC=F", "BZ=F"}},
 	{ID: GroupCNIndices, MenuLabel: "A股指数 (上证 / 创指)", Symbols: []string{"000001.SS", "399006.SZ"}},
 	{ID: GroupHKIndices, MenuLabel: "港股指数 (恒指 / 恒科)", Symbols: []string{"^HSI", "^HSTECH"}},
 	{ID: GroupAsiaIndices, MenuLabel: "日韩指数 (日经225 / 韩国综合)", Symbols: []string{"^N225", "^KS11"}},
@@ -84,6 +88,8 @@ var (
 		"SMH":       "SMH",
 		"NVDA":      "NVDA",
 		"MSFT":      "MSFT",
+		"GC=F":      "黄金",
+		"BZ=F":      "布油",
 		"000001.SS": "上证",
 		"399006.SZ": "创指",
 		"^HSI":      "恒指",
@@ -101,6 +107,8 @@ var (
 		"SMH":       "NASDAQ:SMH",
 		"NVDA":      "NASDAQ:NVDA",
 		"MSFT":      "NASDAQ:MSFT",
+		"GC=F":      "COMEX:GC",
+		"BZ=F":      "ICE:BZ",
 		"000001.SS": "SSE:000001",
 		"399006.SZ": "SZSE:399006",
 		"^HSI":      "HKEX:HSI",
@@ -125,6 +133,7 @@ var (
 		"ETF":    true,
 		"EQUITY": true,
 		"INDEX":  true,
+		"FUTURE": true,
 		"":       true,
 	}
 )
@@ -352,6 +361,17 @@ func ResolveSessionStateForType(marketState, quoteType string, now time.Time, gm
 	raw := strings.ToUpper(strings.TrimSpace(marketState))
 	qt := strings.ToUpper(strings.TrimSpace(quoteType))
 	isIndex := qt == "INDEX"
+	isFuture := qt == "FUTURE"
+
+	if isFuture {
+		if raw == "CLOSED" {
+			return StateClosed, "休市 (Closed)"
+		}
+		if raw == "REGULAR" {
+			return StateRegular, "24h 实时交易 (Regular)"
+		}
+		return resolveCommoditySession(now)
+	}
 
 	switch raw {
 	case "REGULAR":
@@ -443,6 +463,264 @@ func inferSessionByClock(now time.Time, gmtOffsetSeconds int64) (SessionState, s
 		return StateRegular, "盘中 (Regular)"
 	}
 	return StateClosed, "休市 (Closed)"
+}
+
+func resolveCommoditySession(now time.Time) (SessionState, string) {
+	nyZone := time.FixedZone("EDT", -4*3600)
+	ny := now.In(nyZone)
+	wd := ny.Weekday()
+	mins := ny.Hour()*60 + ny.Minute()
+
+	if wd == time.Saturday || (wd == time.Friday && mins >= 17*60) || (wd == time.Sunday && mins < 18*60) {
+		return StateClosed, "周末休市"
+	}
+	if mins >= 17*60 && mins < 18*60 {
+		return StateClosed, "盘间结算休市"
+	}
+	return StateRegular, "24h 实时交易 (Regular)"
+}
+
+func resolveCNHKSession(sym string, now time.Time, tradeTime int64) (SessionState, string) {
+	cstZone := time.FixedZone("CST", 8*3600)
+	local := now.In(cstZone)
+	wd := local.Weekday()
+	if wd == time.Saturday || wd == time.Sunday {
+		return StateClosed, "周末休市"
+	}
+	if tradeTime > 0 {
+		tLocal := time.Unix(tradeTime, 0).In(cstZone)
+		if tLocal.Year() != local.Year() || tLocal.YearDay() != local.YearDay() {
+			if local.Hour()*60+local.Minute() >= 9*60+15 {
+				return StateClosed, "休市 (Closed)"
+			}
+		}
+	}
+	mins := local.Hour()*60 + local.Minute()
+	if sym == "000001.SS" || sym == "399006.SZ" {
+		switch {
+		case mins >= 9*60+15 && mins < 9*60+30:
+			return StatePreMarket, "集合竞价 (Pre-Market)"
+		case (mins >= 9*60+30 && mins <= 11*60+31) || (mins >= 13*60 && mins <= 15*60+1):
+			return StateRegular, "盘中实时 (Regular)"
+		case mins > 11*60+31 && mins < 13*60:
+			return StateClosed, "午间休市 (Lunch Break)"
+		default:
+			return StateClosed, "休市 (Closed)"
+		}
+	}
+	// 港股 (^HSI, ^HSTECH)
+	switch {
+	case mins >= 9*60 && mins < 9*60+30:
+		return StatePreMarket, "开市前时段 (Pre-Market)"
+	case (mins >= 9*60+30 && mins <= 12*60+1) || (mins >= 13*60 && mins <= 16*60+10):
+		return StateRegular, "盘中实时 (Regular)"
+	case mins > 12*60+1 && mins < 13*60:
+		return StateClosed, "午间休市 (Lunch Break)"
+	default:
+		return StateClosed, "休市 (Closed)"
+	}
+}
+
+var tencentSymbolMap = map[string]string{
+	"000001.SS": "sh000001",
+	"399006.SZ": "sz399006",
+	"^HSI":      "r_hkHSI",
+	"^HSTECH":   "r_hkHSTECH",
+	"GC=F":      "hf_GC",
+	"BZ=F":      "hf_OIL",
+}
+
+var tencentVarToSymbol = map[string]string{
+	"v_sh000001":   "000001.SS",
+	"v_sz399006":   "399006.SZ",
+	"v_r_hkHSI":    "^HSI",
+	"v_hkHSI":      "^HSI",
+	"v_r_hkHSTECH": "^HSTECH",
+	"v_hkHSTECH":   "^HSTECH",
+	"v_hf_GC":      "GC=F",
+	"v_hf_OIL":     "BZ=F",
+}
+
+var commodityDescriptions = map[string]string{
+	"GC=F":      "COMEX 黄金期货 (Gold Futures)",
+	"BZ=F":      "ICE 布伦特原油 (Brent Crude)",
+	"000001.SS": "上证综合指数 (SSE Composite)",
+	"399006.SZ": "创业板指数 (ChiNext)",
+	"^HSI":      "恒生指数 (Hang Seng Index)",
+	"^HSTECH":   "恒生科技指数 (Hang Seng TECH Index)",
+}
+
+func TencentQueryForSymbols(symbols []string) (string, bool) {
+	if len(symbols) == 0 {
+		return "", false
+	}
+	var q []string
+	for _, s := range symbols {
+		t, ok := tencentSymbolMap[s]
+		if !ok {
+			return "", false
+		}
+		q = append(q, t)
+	}
+	return strings.Join(q, ","), true
+}
+
+// ParseTencentQuoteBatch 解析腾讯行情接口 (qt.gtimg.cn) 返回的 0 秒级实时行情。
+func ParseTencentQuoteBatch(expectedSymbols []string, body []byte, rttMs float64, now time.Time) (map[string]SymbolResult, error) {
+	if len(body) > MaxBody {
+		return nil, fmt.Errorf("响应超过 %d 字节上限", MaxBody)
+	}
+	text := string(body)
+	lines := strings.Split(text, ";")
+	out := make(map[string]SymbolResult, len(expectedSymbols))
+	cstZone := time.FixedZone("CST", 8*3600)
+	var anySuccess bool
+
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		eq := strings.IndexByte(line, '=')
+		if eq <= 0 {
+			continue
+		}
+		varName := strings.TrimSpace(line[:eq])
+		val := strings.Trim(strings.TrimSpace(line[eq+1:]), "\"\r\n ")
+		if val == "" {
+			continue
+		}
+
+		sym, ok := tencentVarToSymbol[varName]
+		if !ok {
+			continue
+		}
+
+		if strings.HasPrefix(varName, "v_hf_") {
+			// 期货格式 (逗号分隔): 4019.64,-0.46,4019.70,4019.90,4033.50,4016.70,11:16:58,4038.40,4032.80,0,1,1,2026-10-27,纽约黄金
+			parts := strings.Split(val, ",")
+			if len(parts) < 13 {
+				out[sym] = SymbolResult{Err: "期货行情字段不足"}
+				continue
+			}
+			price, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+			prevClose, err2 := strconv.ParseFloat(strings.TrimSpace(parts[7]), 64)
+			if err1 != nil || err2 != nil || price <= 0 || prevClose <= 0 {
+				out[sym] = SymbolResult{Err: "期货价格解析错误"}
+				continue
+			}
+			changeAbs := price - prevClose
+			changePct := changeAbs / prevClose * 100.0
+
+			var tradeTime int64
+			dateStr := strings.TrimSpace(parts[12])
+			timeStr := strings.TrimSpace(parts[6])
+			if t, err := time.ParseInLocation("2006-01-02 15:04:05", dateStr+" "+timeStr, cstZone); err == nil {
+				tradeTime = t.Unix()
+			}
+
+			state, session := resolveCommoditySession(now)
+			desc := commodityDescriptions[sym]
+			if desc == "" {
+				desc = AliasFor(sym)
+			}
+
+			q := Quote{
+				Symbol:        sym,
+				Alias:         AliasFor(sym),
+				Price:         price,
+				ChangePercent: changePct,
+				ChangeAbs:     changeAbs,
+				RegularPrice:  prevClose,
+				Currency:      "USD",
+				QuoteType:     "FUTURE",
+				MarketState:   "REGULAR",
+				State:         state,
+				TradeTime:     tradeTime,
+				QuoteSource:   "Tencent Real Time",
+				UpdateMode:    "commodity_realtime",
+				Session:       session,
+				Description:   desc,
+				RTTMs:         rttMs,
+			}
+			if err := ValidateQuote(q); err != nil {
+				out[sym] = SymbolResult{Err: err.Error()}
+			} else {
+				anySuccess = true
+				qCopy := q
+				out[sym] = SymbolResult{Quote: &qCopy}
+			}
+		} else {
+			// A股/港股格式 (~分隔): 1~上证指数~000001~3691.37~3697.52~...~20261027111742~-6.15~-0.17~...
+			parts := strings.Split(val, "~")
+			if len(parts) < 33 {
+				out[sym] = SymbolResult{Err: "指数行情字段不足"}
+				continue
+			}
+			price, err1 := strconv.ParseFloat(strings.TrimSpace(parts[3]), 64)
+			prevClose, err2 := strconv.ParseFloat(strings.TrimSpace(parts[4]), 64)
+			if err1 != nil || err2 != nil || price <= 0 || prevClose <= 0 {
+				out[sym] = SymbolResult{Err: "指数价格解析错误"}
+				continue
+			}
+			changeAbs := price - prevClose
+			changePct := changeAbs / prevClose * 100.0
+
+			var tradeTime int64
+			tsRaw := strings.TrimSpace(parts[30])
+			if t, err := time.ParseInLocation("20060102150405", tsRaw, cstZone); err == nil {
+				tradeTime = t.Unix()
+			} else if t, err := time.ParseInLocation("2006/01/02 15:04:05", tsRaw, cstZone); err == nil {
+				tradeTime = t.Unix()
+			}
+
+			cur := "CNY"
+			if strings.HasPrefix(sym, "^") {
+				cur = "HKD"
+			}
+			state, session := resolveCNHKSession(sym, now, tradeTime)
+			desc := commodityDescriptions[sym]
+			if desc == "" {
+				desc = AliasFor(sym)
+			}
+
+			q := Quote{
+				Symbol:        sym,
+				Alias:         AliasFor(sym),
+				Price:         price,
+				ChangePercent: changePct,
+				ChangeAbs:     changeAbs,
+				RegularPrice:  prevClose,
+				Currency:      cur,
+				QuoteType:     "INDEX",
+				MarketState:   "REGULAR",
+				State:         state,
+				TradeTime:     tradeTime,
+				QuoteSource:   "Tencent Real Time",
+				UpdateMode:    "cnhk_realtime",
+				Session:       session,
+				Description:   desc,
+				RTTMs:         rttMs,
+			}
+			if err := ValidateQuote(q); err != nil {
+				out[sym] = SymbolResult{Err: err.Error()}
+			} else {
+				anySuccess = true
+				qCopy := q
+				out[sym] = SymbolResult{Quote: &qCopy}
+			}
+		}
+	}
+
+	for _, sym := range expectedSymbols {
+		if _, ok := out[sym]; !ok {
+			out[sym] = SymbolResult{Err: "缺少标的响应"}
+		}
+	}
+	if !anySuccess {
+		return out, fmt.Errorf("全部标的解析失败")
+	}
+	return out, nil
 }
 
 // DetectSession 根据交易所时区偏移返回当前时段文本描述。

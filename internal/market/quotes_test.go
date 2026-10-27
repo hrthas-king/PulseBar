@@ -234,3 +234,109 @@ func TestParseYahooChartAndSession(t *testing.T) {
 		t.Fatal("expected inconsistent fulldayChangePercent to fail validation")
 	}
 }
+
+func TestTencentQueryForSymbols(t *testing.T) {
+	qCN, okCN := TencentQueryForSymbols([]string{"000001.SS", "399006.SZ"})
+	if !okCN || qCN != "sh000001,sz399006" {
+		t.Fatalf("unexpected CN query: %q, ok=%v", qCN, okCN)
+	}
+
+	qHK, okHK := TencentQueryForSymbols([]string{"^HSI", "^HSTECH"})
+	if !okHK || qHK != "r_hkHSI,r_hkHSTECH" {
+		t.Fatalf("unexpected HK query: %q, ok=%v", qHK, okHK)
+	}
+
+	qGoldOil, okGoldOil := TencentQueryForSymbols([]string{"GC=F", "BZ=F"})
+	if !okGoldOil || qGoldOil != "hf_GC,hf_OIL" {
+		t.Fatalf("unexpected Gold/Oil query: %q, ok=%v", qGoldOil, okGoldOil)
+	}
+
+	_, okUS := TencentQueryForSymbols([]string{"VOO", "QQQ"})
+	if okUS {
+		t.Fatalf("expected VOO/QQQ to not match Tencent query")
+	}
+}
+
+func TestParseTencentQuoteBatch_Commodities(t *testing.T) {
+	raw := []byte("v_hf_GC=\"4019.64,-0.46,4019.70,4019.90,4033.50,4016.70,11:16:58,4038.40,4032.80,0,1,1,2026-10-27,\xc5\xa6\xd4\xbc\xbb\xc6\xbd\xf0\";\r\n" +
+		"v_hf_OIL=\"109.65,1.20,109.60,109.70,110.20,108.50,11:17:02,108.35,108.35,0,1,1,2026-10-27,\xb2\xbc\xc2\xd7\xcc\xd8\xd4\xad\xd3\xcd\";\r\n")
+	syms := []string{"GC=F", "BZ=F"}
+	tuesdayNoon := time.Date(2026, 10, 27, 4, 0, 0, 0, time.UTC)
+	batch, err := ParseTencentQuoteBatch(syms, raw, 65.0, tuesdayNoon)
+	if err != nil {
+		t.Fatalf("unexpected ParseTencentQuoteBatch error: %v", err)
+	}
+	gc := batch["GC=F"].Quote
+	bz := batch["BZ=F"].Quote
+	if gc == nil || bz == nil {
+		t.Fatalf("expected both quotes, got: %+v", batch)
+	}
+	if gc.Price != 4019.64 || gc.Alias != "黄金" || gc.Currency != "USD" || gc.QuoteType != "FUTURE" {
+		t.Fatalf("unexpected GC quote: %+v", gc)
+	}
+	if gc.State != StateRegular || gc.Session != "24h 实时交易 (Regular)" {
+		t.Fatalf("unexpected GC session state: %v (%s)", gc.State, gc.Session)
+	}
+	if bz.Price != 109.65 || bz.Alias != "布油" || bz.QuoteSource != "Tencent Real Time" {
+		t.Fatalf("unexpected BZ quote: %+v", bz)
+	}
+
+	saturdayNoon := time.Date(2026, 10, 24, 4, 0, 0, 0, time.UTC)
+	batchWknd, err := ParseTencentQuoteBatch(syms, raw, 65.0, saturdayNoon)
+	if err != nil {
+		t.Fatalf("unexpected error on weekend: %v", err)
+	}
+	if batchWknd["GC=F"].Quote.State != StateClosed || batchWknd["BZ=F"].Quote.State != StateClosed {
+		t.Fatalf("expected StateClosed on weekend, got %v / %v", batchWknd["GC=F"].Quote.State, batchWknd["BZ=F"].Quote.State)
+	}
+}
+
+func TestParseTencentQuoteBatch_CNAndHK(t *testing.T) {
+	raw := []byte("v_sh000001=\"1~上证指数~000001~3691.37~3697.52~3698.10~192837~120392~72445~3691.37~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~~20261027111742~-6.15~-0.17~3705.12~3688.02~3691.37/192837/24567890123~192837~245678~0.85~12.50~\";\r\n" +
+		"v_sz399006=\"1~创业板指~399006~2630.50~2638.23~2640.10~92837~80392~12445~2630.50~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~~20261027111742~-7.73~-0.29~2645.12~2628.02~2630.50/92837/14567890123~92837~145678~1.15~15.50~\";\r\n")
+	syms := []string{"000001.SS", "399006.SZ"}
+	tuesdayMorning := time.Date(2026, 10, 27, 3, 17, 42, 0, time.UTC)
+	batch, err := ParseTencentQuoteBatch(syms, raw, 55.0, tuesdayMorning)
+	if err != nil {
+		t.Fatalf("unexpected ParseTencentQuoteBatch error: %v", err)
+	}
+	sh := batch["000001.SS"].Quote
+	sz := batch["399006.SZ"].Quote
+	if sh == nil || sz == nil {
+		t.Fatalf("expected both quotes, got: %+v", batch)
+	}
+	if sh.Price != 3691.37 || sh.Alias != "上证" || sh.State != StateRegular || sh.Currency != "CNY" {
+		t.Fatalf("unexpected SH quote: %+v", sh)
+	}
+	if sz.Price != 2630.50 || sz.Alias != "创指" || sz.State != StateRegular || sz.Currency != "CNY" {
+		t.Fatalf("unexpected SZ quote: %+v", sz)
+	}
+
+	lunchTime := time.Date(2026, 10, 27, 4, 15, 0, 0, time.UTC)
+	batchLunch, err := ParseTencentQuoteBatch(syms, raw, 55.0, lunchTime)
+	if err != nil {
+		t.Fatalf("unexpected lunch batch error: %v", err)
+	}
+	if batchLunch["000001.SS"].Quote.State != StateClosed || batchLunch["000001.SS"].Quote.Session != "午间休市 (Lunch Break)" {
+		t.Fatalf("expected lunch break StateClosed, got %v (%s)", batchLunch["000001.SS"].Quote.State, batchLunch["000001.SS"].Quote.Session)
+	}
+
+	rawHK := []byte("v_r_hkHSI=\"100~恒生指数~HSI~23211.81~23093.37~23150.00~56789~0~0~23211.81~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~~2026/10/27 11:17:43~118.44~0.51~23250.00~23080.00~23211.81/56789/12345678901~56789~123456~0.00~0.00~\";\r\n" +
+		"v_r_hkHSTECH=\"100~恒生科技指数~HSTECH~3857.53~3871.66~3860.00~45678~0~0~3857.53~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~0~~2026/10/27 11:17:43~-14.13~-0.36~3870.00~3840.00~3857.53/45678/9876543210~45678~98765~0.00~0.00~\";\r\n")
+	symsHK := []string{"^HSI", "^HSTECH"}
+	batchHK, err := ParseTencentQuoteBatch(symsHK, rawHK, 60.0, tuesdayMorning)
+	if err != nil {
+		t.Fatalf("unexpected HK batch error: %v", err)
+	}
+	hsi := batchHK["^HSI"].Quote
+	hstech := batchHK["^HSTECH"].Quote
+	if hsi == nil || hstech == nil {
+		t.Fatalf("expected HK quotes, got: %+v", batchHK)
+	}
+	if hsi.Price != 23211.81 || hsi.Alias != "恒指" || hsi.Currency != "HKD" || hsi.State != StateRegular {
+		t.Fatalf("unexpected HSI quote: %+v", hsi)
+	}
+	if hstech.Price != 3857.53 || hstech.Alias != "恒科" || hstech.Currency != "HKD" {
+		t.Fatalf("unexpected HSTECH quote: %+v", hstech)
+	}
+}

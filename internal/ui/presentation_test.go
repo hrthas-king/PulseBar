@@ -92,8 +92,8 @@ func TestLatencyDoesNotUseTunnelHeartbeat(t *testing.T) {
 }
 
 func TestShenzhenETFsDisplayThreeDecimalPrices(t *testing.T) {
-	first := market.Quote{Symbol: "159632.SZ", Alias: "159632", Price: 1.234, RegularPrice: 1.224, ChangeAbs: 0.010, ChangePercent: 0.82}
-	second := market.Quote{Symbol: "159655.SZ", Alias: "159655", Price: 1.876, RegularPrice: 1.877, ChangeAbs: -0.001, ChangePercent: -0.05}
+	first := market.Quote{Symbol: "159632.SZ", Alias: "纳指ETF", Description: "纳斯达克ETF华安 (QDII)", Price: 1.234, RegularPrice: 1.224, ChangeAbs: 0.010, ChangePercent: 0.82}
+	second := market.Quote{Symbol: "159655.SZ", Alias: "标普500ETF", Description: "标普500ETF华夏 (QDII)", Price: 1.876, RegularPrice: 1.877, ChangeAbs: -0.001, ChangePercent: -0.05}
 	views := []market.View{
 		{Symbol: first.Symbol, Alias: first.Alias, Quote: &first, Healthy: true},
 		{Symbol: second.Symbol, Alias: second.Alias, Quote: &second, Healthy: true},
@@ -102,18 +102,45 @@ func TestShenzhenETFsDisplayThreeDecimalPrices(t *testing.T) {
 	if got := quotePriceChangeText(first); got != "1.234 +0.82%" {
 		t.Fatalf("taskbar ETF price=%q", got)
 	}
-	if got := QuoteSummary(snap); got != "159632 1.234 +0.82% | 159655 1.876 -0.05%" {
+	if got := QuoteSummary(snap); got != "纳指ETF 1.234 +0.82% | 标普500ETF 1.876 -0.05%" {
 		t.Fatalf("tray ETF summary=%q", got)
 	}
 	diag := DiagnosticsText("test", snap)
+	overlay := OverlayTooltip(snap)
 	for _, expected := range []string{
 		"当前最新价: 1.234 (常规盘收盘: 1.224) | 涨跌额: +0.010",
 		"当前最新价: 1.876 (常规盘收盘: 1.877) | 涨跌额: -0.001",
 		"参考基准价: 1.224",
 		"参考基准价: 1.877",
+		"纳指ETF",
+		"标普500ETF",
+		"纳斯达克ETF华安 (QDII)",
+		"标普500ETF华夏 (QDII)",
 	} {
 		if !strings.Contains(diag, expected) {
 			t.Errorf("diagnostics missing %q:\n%s", expected, diag)
+		}
+	}
+	for _, shown := range []string{diag, overlay, TrayTooltip(snap)} {
+		for _, code := range []string{"159632", "159655"} {
+			if strings.Contains(shown, code) {
+				t.Errorf("user-facing presentation exposed %s:\n%s", code, shown)
+			}
+		}
+	}
+	if !strings.Contains(overlay, "纳指ETF") || !strings.Contains(overlay, "标普500ETF") {
+		t.Fatalf("overlay missing ETF names:\n%s", overlay)
+	}
+	// Before the first response, the two pending quote labels must also be names.
+	pending := app.Snapshot{MarketGroup: market.GroupETF159632159655}
+	if got := QuoteSummary(pending); got != "纳指ETF -- | 标普500ETF --" {
+		t.Fatalf("pending quote summary=%q", got)
+	}
+	for _, sym := range []string{first.Symbol, second.Symbol} {
+		pendingView := market.View{Symbol: sym, Healthy: false, Reason: "等待行情"}
+		text := pendingView.Tooltip()
+		if strings.Contains(text, "159632") || strings.Contains(text, "159655") {
+			t.Errorf("pending tooltip exposed ETF code: %s", text)
 		}
 	}
 	if got := quotePriceChangeText(market.Quote{Symbol: "VOO", Price: 699.051, ChangePercent: 0.07}); got != "699.05 +0.07%" {

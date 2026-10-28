@@ -16,8 +16,8 @@ import (
 )
 
 func TestTrayTooltipPreservesETFQuotesWithLongIPv6(t *testing.T) {
-	first := market.Quote{Symbol: "159632.SZ", Alias: "159632", Price: 1.234, ChangePercent: 0.82}
-	second := market.Quote{Symbol: "159655.SZ", Alias: "159655", Price: 1.876, ChangePercent: -0.05}
+	first := market.Quote{Symbol: "159632.SZ", Alias: "纳指ETF", Price: 1.234, ChangePercent: 0.82}
+	second := market.Quote{Symbol: "159655.SZ", Alias: "标普500ETF", Price: 1.876, ChangePercent: -0.05}
 	snap := app.Snapshot{
 		Status:      monitor.Online,
 		MarketGroup: "etf_159632_159655",
@@ -33,7 +33,7 @@ func TestTrayTooltipPreservesETFQuotesWithLongIPv6(t *testing.T) {
 	var native [128]uint16
 	copyText(native[:], tip)
 	shown := syscall.UTF16ToString(native[:])
-	for _, part := range []string{"[KR] 正常", "HTTPS: 248ms", "↑12.5K ↓1.5M", "159632 1.234 +0.82%", "159655 1.876 -0.05%", "诊断"} {
+	for _, part := range []string{"[KR] 正常", "HTTPS: 248ms", "↑12.5K ↓1.5M", "纳指ETF 1.234 +0.82%", "标普500ETF 1.876 -0.05%", "诊断"} {
 		if !strings.Contains(shown, part) {
 			t.Errorf("native tray tooltip lost %q: %q (original units=%d)", part, shown, len(utf16.Encode([]rune(tip))))
 		}
@@ -48,7 +48,7 @@ func TestTrayTooltipPreservesETFQuotesWithLongIPv6(t *testing.T) {
 	snap.GeoError = "lookup failed"
 	copyText(native[:], TrayTooltip(snap))
 	shown = syscall.UTF16ToString(native[:])
-	if !strings.Contains(shown, "…*(见诊断)") || !strings.Contains(shown, "159655 1.876 -0.05%") {
+	if !strings.Contains(shown, "…*(见诊断)") || !strings.Contains(shown, "标普500ETF 1.876 -0.05%") {
 		t.Errorf("truncated IP lost its error marker or second ETF: %q", shown)
 	}
 }

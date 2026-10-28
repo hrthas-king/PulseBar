@@ -75,7 +75,7 @@ var Groups = []GroupSpec{
 	{ID: GroupHKIndices, MenuLabel: "港股指数 (恒指 / 恒科)", Symbols: []string{"^HSI", "^HSTECH"}},
 	{ID: GroupAsiaIndices, MenuLabel: "日韩指数 (日经225 / 韩国综合)", Symbols: []string{"^N225", "^KS11"}},
 	{ID: GroupEUIndices, MenuLabel: "欧洲指数 (法国CAC / 德国DAX)", Symbols: []string{"^FCHI", "^GDAXI"}},
-	{ID: GroupETF159632159655, MenuLabel: "纳斯达克 / 标普 ETF (159632 / 159655)", Symbols: []string{"159632.SZ", "159655.SZ"}},
+	{ID: GroupETF159632159655, MenuLabel: "华安纳指ETF / 华夏标普500ETF", Symbols: []string{"159632.SZ", "159655.SZ"}},
 }
 
 var (
@@ -100,8 +100,8 @@ var (
 		"^KS11":     "韩指",
 		"^FCHI":     "CAC40",
 		"^GDAXI":    "DAX",
-		"159632.SZ": "159632",
-		"159655.SZ": "159655",
+		"159632.SZ": "纳指ETF",
+		"159655.SZ": "标普500ETF",
 	}
 
 	Tickers = map[string]string{
@@ -251,6 +251,9 @@ func (q Quote) SessionText() string {
 }
 
 func (q Quote) DisplayName() string {
+	if isTrackedSZETF(q.Symbol) {
+		return AliasFor(q.Symbol)
+	}
 	if q.Alias != "" {
 		return q.Alias
 	}
@@ -1224,6 +1227,9 @@ type View struct {
 }
 
 func (v View) DisplayName() string {
+	if isTrackedSZETF(v.Symbol) {
+		return AliasFor(v.Symbol)
+	}
 	if v.Alias != "" {
 		return v.Alias
 	}
@@ -1261,7 +1267,7 @@ func (v View) Tooltip() string {
 		fetched = fmt.Sprintf("%.1fs 前轮询", *v.ReceivedAge)
 	}
 	name := v.DisplayName()
-	if name != v.Symbol {
+	if name != v.Symbol && !isTrackedSZETF(v.Symbol) {
 		name = fmt.Sprintf("%s (%s)", name, v.Symbol)
 	}
 	if v.Quote != nil {
@@ -1294,12 +1300,24 @@ func (v View) Tooltip() string {
 			srcInfo = "；数据源: " + v.Quote.QuoteSource
 		}
 		decimals := PriceDecimals(v.Symbol)
-		return fmt.Sprintf("%s %s: %.*f (%+.2f%%, 涨跌 %+.*f, 常规收盘 %.*f) | %s\n  %s (%s)；时段: %s %s%s%s；%s",
+		description := v.Quote.Description
+		if isTrackedSZETF(v.Symbol) {
+			if description == "" {
+				description = commodityDescriptions[v.Symbol]
+			}
+		} else {
+			description = fmt.Sprintf("%s (%s)", description, Tickers[v.Symbol])
+		}
+		return fmt.Sprintf("%s %s: %.*f (%+.2f%%, 涨跌 %+.*f, 常规收盘 %.*f) | %s\n  %s；时段: %s %s%s%s；%s",
 			stateBadge, name, decimals, v.Quote.Price, v.Quote.ChangePercent, decimals, v.Quote.ChangeAbs, decimals, v.Quote.RegularPrice, status,
-			v.Quote.Description, Tickers[v.Symbol], stateBadge, session, srcInfo, tradeInfo, fetched)
+			description, stateBadge, session, srcInfo, tradeInfo, fetched)
+	}
+	description := Tickers[v.Symbol]
+	if isTrackedSZETF(v.Symbol) {
+		description = commodityDescriptions[v.Symbol]
 	}
 	return fmt.Sprintf("%s %s: %s\n  %s；%s；%s",
-		stateBadge, name, status, Tickers[v.Symbol], session, fetched)
+		stateBadge, name, status, description, session, fetched)
 }
 
 type feedState struct {

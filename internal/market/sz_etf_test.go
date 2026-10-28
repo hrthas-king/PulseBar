@@ -1,6 +1,7 @@
 package market
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -15,6 +16,61 @@ func etfRow(variable, code, price, previous, timestamp string) string {
 	fields[3], fields[4], fields[30] = price, previous, timestamp
 	fields[31], fields[32] = "0", "0"
 	return fmt.Sprintf("v_%s=\"%s\";\r\n", variable, strings.Join(fields, "~"))
+}
+
+func TestSZETFUsesNamesInAllQuoteTooltips(t *testing.T) {
+	const expectedMenu = "华安纳指ETF / 华夏标普500ETF"
+	if got := GroupByID(GroupETF159632159655).MenuLabel; got != expectedMenu {
+		t.Fatalf("group menu = %q, want %q", got, expectedMenu)
+	}
+	for _, tc := range []struct {
+		symbol, legacyAlias, alias, fullName string
+	}{
+		{"159632.SZ", "159632", "纳指ETF", "纳斯达克ETF华安"},
+		{"159655.SZ", "159655", "标普500ETF", "标普500ETF华夏"},
+	} {
+		t.Run(tc.symbol, func(t *testing.T) {
+			if got := AliasFor(tc.symbol); got != tc.alias {
+				t.Fatalf("alias = %q, want %q", got, tc.alias)
+			}
+			quote := Quote{Symbol: tc.symbol, Alias: tc.legacyAlias, Description: commodityDescriptions[tc.symbol], Price: 2.509, RegularPrice: 2.447, ChangeAbs: 0.062, ChangePercent: 2.53, State: StateRegular, Session: "盘中", TradeTime: time.Now().Add(-time.Second).Unix()}
+			closedQuote := quote
+			closedQuote.State, closedQuote.Session = StateClosed, "休市"
+			for _, state := range []struct {
+				name string
+				view View
+			}{
+				{"normal", View{Symbol: tc.symbol, Alias: tc.legacyAlias, Quote: &quote, Healthy: true}},
+				{"closed", View{Symbol: tc.symbol, Alias: tc.legacyAlias, Quote: &closedQuote, Healthy: true}},
+				{"missing", View{Symbol: tc.symbol, Alias: tc.legacyAlias, Reason: "行情源不可用"}},
+			} {
+				t.Run(state.name, func(t *testing.T) {
+					if got := state.view.DisplayName(); got != tc.alias {
+						t.Errorf("display name = %q, want %q", got, tc.alias)
+					}
+					text := state.view.Tooltip()
+					if !strings.Contains(text, tc.alias) || !strings.Contains(text, tc.fullName) ||
+						strings.Contains(text, "159632") || strings.Contains(text, "159655") || strings.Contains(text, "SZSE:") {
+						t.Fatalf("tooltip should use fund names without codes: %s", text)
+					}
+					if state.view.Quote != nil && (!strings.Contains(text, "2.509") || !strings.Contains(text, "行情时间")) {
+						t.Fatalf("tooltip lost price precision or quote timestamp: %s", text)
+					}
+					if state.view.Quote == nil && !strings.Contains(text, "行情源不可用") {
+						t.Fatalf("tooltip lost error detail: %s", text)
+					}
+				})
+			}
+			encoded, err := json.Marshal(View{Symbol: tc.symbol, Quote: &quote})
+			if err != nil || !strings.Contains(string(encoded), tc.symbol) {
+				t.Fatalf("internal JSON must retain instrument code: %q, %v", encoded, err)
+			}
+		})
+	}
+	other := View{Symbol: "VOO", Quote: &Quote{Symbol: "VOO", Price: 699.05, Description: "Vanguard S&P 500 ETF"}, Healthy: true}.Tooltip()
+	if !strings.Contains(other, "NYSEArca:VOO") {
+		t.Fatalf("existing ticker tooltip changed: %s", other)
+	}
 }
 
 func TestSZETFGroupTencentQuotes(t *testing.T) {
@@ -40,8 +96,8 @@ func TestSZETFGroupTencentQuotes(t *testing.T) {
 		price, prev   float64
 		timeOffset    time.Duration
 	}{
-		{"159632.SZ", "159632", 2.509, 2.447, 0},
-		{"159655.SZ", "159655", 2.012, 1.995, -3 * time.Second},
+		{"159632.SZ", "纳指ETF", 2.509, 2.447, 0},
+		{"159655.SZ", "标普500ETF", 2.012, 1.995, -3 * time.Second},
 	} {
 		result := batch[tc.symbol]
 		if result.Err != "" || result.Quote == nil {

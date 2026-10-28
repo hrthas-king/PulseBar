@@ -1,6 +1,21 @@
 # 验证记录 (Validation)
 
-## v0.6.0：新增深交所 ETF 行情（最新）
+## v0.6.1：ETF 显示名称调整（最新）
+
+验证日期：**2026-10-27 美东时间**。任务栏与托盘使用 `纳指ETF`、`标普500ETF`，菜单使用 `华安纳指ETF / 华夏标普500ETF`；悬停和诊断显示基金名称。内部行情代码仍用于请求、校验与 JSON 数据。
+
+- 完整测试 **32 项**（含子项共 **58 项**）、`go vet`、`gofmt` 检查均通过；amd64 和 arm64 构建通过，ARM64 尚未真机运行。
+- 自动测试覆盖正常行情、休市、无报价、托盘 IPv6、悬停、诊断及菜单，确认两只基金不会以证券代码显示；三位价格、行情时间、错误提示、其他标的与内部 JSON 保持正确。
+- 10 秒原生 GUI 冒烟通过，两只基金以新名称获取到腾讯行情；重启后原有配置文件保持不变。该次 GUI 私有工作集为 **6,795,264 字节（约 6.48 MiB）**。
+
+本轮本机独立构建产物 SHA-256（GitHub Actions 采用不同 Go 工具链，哈希可能不同）：
+
+```text
+4630C38BBCB5CBEBF38D9DD94FE4F8DF13F0FE8A018D29F6AA1509740DC68E0D  PulseBar.exe / dist/PulseBar-windows-amd64.exe
+F795365612BDEB3551BA3109B9FCC5CBB090EB142C66AACA5F4DF30F0ECBC213  PulseBar-v0.6.1-arm64.exe
+```
+
+## v0.6.0：新增深交所 ETF 行情（历史）
 
 验证日期：**2026-10-27 美东时间**（对应下述行情日期为 **2026-10-28 北京时间**）。本轮源码全量测试 **31 项**（含子项共 **49 项**）通过，`go vet`、`gofmt` 检查与 Windows amd64 / arm64 构建均通过。ARM64 尚未在真机运行。
 
@@ -11,7 +26,7 @@
 - 最终 v0.6.0 构建的 10 秒原生 GUI 冒烟通过（`gui_started=true`），两只行情均正常；北京时间 **10:12:12** 的样本为 `159632 2.502`、`159655 2.013`。GUI 私有工作集为 **6,414,336 字节（约 6.12 MiB）**，GDI / USER 对象数为 **21 / 12**。
 - 同期独立读取腾讯与新浪公开行情：例如 `159632` 分别返回 **10:05:15 / 2.507** 与 **10:05:18 / 2.506**，表明不同采样时刻可能得到不同成交价。行情时间距本机接收时刻的差值可能包含无新成交的时间，不能单凭一次采样证明持续零延迟。
 
-本轮本机独立构建产物 SHA-256（与 GitHub Actions 使用不同 Go 工具链时可能不同）：
+以下是 v0.6.0 当时本机独立构建产物的 SHA-256，并非当前版本的文件哈希：
 
 ```text
 B4933C0B06E3B28A638FDA915C7811BA0125067C48754A12D3379CDC65AD3A33  PulseBar.exe / dist/PulseBar-windows-amd64.exe
@@ -22,7 +37,7 @@ E73876F84F1F1A280E32BE803D2B7E91FFF8FA3FC6CB4D99006649EF02394C72  PulseBar-v0.6.
 
 ## 以下为 v0.5.2 历史验证记录
 
-历史记录中的文件版本、哈希与测试数量只代表当时结果；当前 v0.6.0 请以上方记录为准。
+历史记录中的文件版本、哈希与测试数量只代表当时结果；当前版本请以上方记录为准。
 
 ### 1. v0.5.2 验证范围与结论
 
@@ -148,8 +163,8 @@ $env:GOTMPDIR = $validationTemp
 `verify.ps1` 会生成 `dev` 版本的检查程序。完成后使用明确版本重新构建，并同步根目录运行副本：
 
 ```powershell
-./scripts/build.ps1 -Arch amd64 -Version v0.6.0
-./scripts/build.ps1 -Arch arm64 -Version v0.6.0
+./scripts/build.ps1 -Arch amd64 -Version v0.6.1
+./scripts/build.ps1 -Arch arm64 -Version v0.6.1
 Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
 ./PulseBar.exe --version
 Get-FileHash ./PulseBar.exe, ./dist/PulseBar-windows-amd64.exe -Algorithm SHA256
@@ -158,8 +173,8 @@ Get-FileHash ./PulseBar.exe, ./dist/PulseBar-windows-amd64.exe -Algorithm SHA256
 在允许网络探针的正常桌面环境中执行新的运行实测：
 
 ```powershell
-Start-Process ./PulseBar.exe -ArgumentList '--diagnose=10s --output .artifacts/diagnose-v0.6.0.json' -WindowStyle Hidden -Wait
-Start-Process ./PulseBar.exe -ArgumentList '--run-for=10s --output .artifacts/smoke-v0.6.0.json' -WindowStyle Hidden -Wait
+Start-Process ./PulseBar.exe -ArgumentList '--diagnose=10s --output .artifacts/diagnose-v0.6.1.json' -WindowStyle Hidden -Wait
+Start-Process ./PulseBar.exe -ArgumentList '--run-for=10s --output .artifacts/smoke-v0.6.1.json' -WindowStyle Hidden -Wait
 ```
 
 GUI 冒烟前需先退出已有实例，避免单实例机制跳过新运行。诊断 JSON 可能包含公网 IP，提交或公开分享前应脱敏。
@@ -167,5 +182,5 @@ GUI 冒烟前需先退出已有实例，避免单实例机制跳过新运行。�
 如需重新生成本地分发包：
 
 ```powershell
-./scripts/package.ps1 -Version v0.6.0
+./scripts/package.ps1 -Version v0.6.1
 ```

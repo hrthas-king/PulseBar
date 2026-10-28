@@ -128,7 +128,7 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 			return tBatch, nil
 		}
 		// 没有验证 Yahoo 对这两只 ETF 的实时权限；腾讯失败时直接报告错误。
-		if len(syms) == 2 && isTrackedSZETF(syms[0]) && isTrackedSZETF(syms[1]) {
+		if customSymbols(syms) || (len(syms) == 2 && isTrackedSZETF(syms[0]) && isTrackedSZETF(syms[1])) {
 			return tBatch, fmt.Errorf("腾讯 ETF 行情请求失败: %w", tErr)
 		}
 	}

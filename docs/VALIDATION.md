@@ -1,6 +1,27 @@
 # 验证记录 (Validation)
 
-## v0.6.1：ETF 显示名称调整（最新）
+## v0.7.0：其他（自定义A股）（最新）
+
+验证日期：**2026-10-28 美东时间**。默认完整测试 **42 项**（含子项共 **68 项**）通过；`go vet`、格式检查与 Windows amd64 / arm64 构建通过。另有一个默认跳过的真实行情集成测试，已在正常 Windows 会话中单独开启并通过。
+
+- 原生 Win32 浮窗与 EDIT 输入框测试覆盖 Enter 提交、格式错误、远端校验错误、保存失败、Esc、外部失焦及非激活窗口外部点击、面板关闭后迟到结果丢弃。
+- 实际菜单测试核对：组合行可直接选择，旁侧列提供删除命令，`&` 按字面显示；菜单命令绑定稳定组合标识。
+- 配置与聚合引擎测试覆盖添加后保存/切换、重复组合、重新加载、删除非当前组不切换、删除当前组回默认、保存失败不改原状态、旧组快照不能覆盖新选择。
+- 单独开启原生控件与真实行情集成测试：输入 `600519` / `000858` 后通过 Enter 完成后台校验、原子保存、重新加载和行情抓取；随后删除活动组并重新加载，确认记录消失且回到默认组。
+- 实连腾讯核对沪市、深市和北交所 `920002`，成功解析贵州茅台、五粮液、宁德时代、万达轴承；`699999` 被拒绝。该次测试处于休市时段，仅证明接口、代码品类、名称解码与数据流程，不保证盘中持续零延迟。
+- 用含自定义组合的隔离 JSON 启动完整 v0.7.0，10 秒原生 GUI 冒烟成功，两个股票名称与报价正常恢复。随后更新根目录与 dist，并保留实际用户配置原样。
+- 该次 GUI 私有工作集 **6,369,280 字节（约 6.07 MiB）**，GDI / USER 对象数 **21 / 14**。ARM64 仅完成交叉编译，尚未真机运行。
+
+本机产物 SHA-256（GitHub Actions 工具链不同，哈希可能不同）：
+
+```text
+EA33CC07E1E2CFA06F47DD39C18436E1D762B1D53965279D8A6A596453FBDC8E  PulseBar.exe / dist/PulseBar-windows-amd64.exe
+119BCBA4B3D25F8ADA0E28BEFF72921C5EB9DFB1FFB3420121A5A8D8BAD98330  dist/PulseBar-windows-arm64.exe
+```
+
+六位代码支持沪市 `6`、深市 `0/3`、北交所 `4/8`，兼容[北交所启用的 `920` 号段](https://www.bse.cn/important_news/200021629.html)。历史代码的上游返回可能已停止更新；是否有新行情应结合源时间判断。
+
+## v0.6.1：ETF 显示名称调整（历史）
 
 验证日期：**2026-10-27 美东时间**。任务栏与托盘使用 `纳指ETF`、`标普500ETF`，菜单使用 `华安纳指ETF / 华夏标普500ETF`；悬停和诊断显示基金名称。内部行情代码仍用于请求、校验与 JSON 数据。
 
@@ -163,8 +184,8 @@ $env:GOTMPDIR = $validationTemp
 `verify.ps1` 会生成 `dev` 版本的检查程序。完成后使用明确版本重新构建，并同步根目录运行副本：
 
 ```powershell
-./scripts/build.ps1 -Arch amd64 -Version v0.6.1
-./scripts/build.ps1 -Arch arm64 -Version v0.6.1
+./scripts/build.ps1 -Arch amd64 -Version v0.7.0
+./scripts/build.ps1 -Arch arm64 -Version v0.7.0
 Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
 ./PulseBar.exe --version
 Get-FileHash ./PulseBar.exe, ./dist/PulseBar-windows-amd64.exe -Algorithm SHA256
@@ -173,8 +194,8 @@ Get-FileHash ./PulseBar.exe, ./dist/PulseBar-windows-amd64.exe -Algorithm SHA256
 在允许网络探针的正常桌面环境中执行新的运行实测：
 
 ```powershell
-Start-Process ./PulseBar.exe -ArgumentList '--diagnose=10s --output .artifacts/diagnose-v0.6.1.json' -WindowStyle Hidden -Wait
-Start-Process ./PulseBar.exe -ArgumentList '--run-for=10s --output .artifacts/smoke-v0.6.1.json' -WindowStyle Hidden -Wait
+Start-Process ./PulseBar.exe -ArgumentList '--diagnose=10s --output .artifacts/diagnose-v0.7.0.json' -WindowStyle Hidden -Wait
+Start-Process ./PulseBar.exe -ArgumentList '--run-for=10s --output .artifacts/smoke-v0.7.0.json' -WindowStyle Hidden -Wait
 ```
 
 GUI 冒烟前需先退出已有实例，避免单实例机制跳过新运行。诊断 JSON 可能包含公网 IP，提交或公开分享前应脱敏。
@@ -182,5 +203,5 @@ GUI 冒烟前需先退出已有实例，避免单实例机制跳过新运行。�
 如需重新生成本地分发包：
 
 ```powershell
-./scripts/package.ps1 -Version v0.6.1
+./scripts/package.ps1 -Version v0.7.0
 ```

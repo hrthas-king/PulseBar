@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/hrthas-king/PulseBar/internal/watchlist"
 )
 
 const (
@@ -28,15 +30,16 @@ var validMarketGroups = map[string]bool{
 }
 
 type Config struct {
-	IntervalSeconds int    `json:"interval_seconds"`
-	ShowNetDetail   bool   `json:"show_net_detail"`
-	Locked          bool   `json:"locked"`
-	UpIsRed         bool   `json:"up_is_red"`
-	MarketGroup     string `json:"market_group"`
-	UIScalePercent  int    `json:"ui_scale_percent"`
-	Placement       string `json:"placement"`
-	X               *int   `json:"x,omitempty"`
-	Y               *int   `json:"y,omitempty"`
+	CustomPairs     []watchlist.Pair `json:"custom_pairs,omitempty"`
+	IntervalSeconds int              `json:"interval_seconds"`
+	ShowNetDetail   bool             `json:"show_net_detail"`
+	Locked          bool             `json:"locked"`
+	UpIsRed         bool             `json:"up_is_red"`
+	MarketGroup     string           `json:"market_group"`
+	UIScalePercent  int              `json:"ui_scale_percent"`
+	Placement       string           `json:"placement"`
+	X               *int             `json:"x,omitempty"`
+	Y               *int             `json:"y,omitempty"`
 }
 
 func ValidInterval(seconds int) bool {
@@ -93,10 +96,18 @@ func LoadFrom(path string) Config {
 	if json.Unmarshal(data, &saved) != nil {
 		return c
 	}
+	seen := make(map[string]bool)
+	for _, pair := range saved.CustomPairs {
+		p, err := watchlist.NewPair(pair.Code1, pair.Code2)
+		if err == nil && !seen[p.ID()] {
+			c.CustomPairs = append(c.CustomPairs, p)
+			seen[p.ID()] = true
+		}
+	}
 	if ValidInterval(saved.IntervalSeconds) {
 		c.IntervalSeconds = saved.IntervalSeconds
 	}
-	if ValidMarketGroup(saved.MarketGroup) {
+	if c.HasMarketGroup(saved.MarketGroup) {
 		c.MarketGroup = saved.MarketGroup
 	}
 	if ValidUIScalePercent(saved.UIScalePercent) {
@@ -129,8 +140,16 @@ func SaveTo(path string, c Config) error {
 	}
 	if c.MarketGroup == "" {
 		c.MarketGroup = DefaultMarketGroup
-	} else if !ValidMarketGroup(c.MarketGroup) {
+	} else if !c.HasMarketGroup(c.MarketGroup) {
 		return fmt.Errorf("无效的行情标的分组: %s", c.MarketGroup)
+	}
+	seen := make(map[string]bool)
+	for _, pair := range c.CustomPairs {
+		p, err := watchlist.NewPair(pair.Code1, pair.Code2)
+		if err != nil || p != pair || seen[p.ID()] {
+			return fmt.Errorf("自定义股票组合无效或重复")
+		}
+		seen[p.ID()] = true
 	}
 	if c.UIScalePercent == 0 {
 		c.UIScalePercent = DefaultUIScalePercent

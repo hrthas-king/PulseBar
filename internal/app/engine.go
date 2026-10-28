@@ -257,7 +257,6 @@ func (e *Engine) Run(ctx context.Context, seconds int, publish func(Snapshot)) {
 		snapshot.At = now
 		snapshot.Status = tracker.Status
 		snapshot.Failures = tracker.Failures
-		snapshot.MarketGroup = market.ActiveGroup().ID
 		snapshot.Quotes = quoteTracker.Views(now, QuotePollInterval(snapshot.IntervalSeconds))
 		publish(snapshot)
 	}

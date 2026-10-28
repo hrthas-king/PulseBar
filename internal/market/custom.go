@@ -1,0 +1,137 @@
+package market
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/hrthas-king/PulseBar/internal/watchlist"
+)
+
+var customGroups []GroupSpec // protected by groupMu; replacement never mutates shared maps
+
+func SetCustomPairs(pairs []watchlist.Pair) error {
+	groups := make([]GroupSpec, 0, len(pairs))
+	seen := make(map[string]bool)
+	for _, pair := range pairs {
+		p, err := watchlist.NewPair(pair.Code1, pair.Code2)
+		if err != nil {
+			return err
+		}
+		if seen[p.ID()] {
+			return fmt.Errorf("重复的自定义组合")
+		}
+		seen[p.ID()] = true
+		groups = append(groups, GroupSpec{ID: p.ID(), MenuLabel: p.Label(), Symbols: p.Symbols()})
+	}
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	customGroups = groups
+	if strings.HasPrefix(activeGroup.ID, "custom_") {
+		activeGroup = groupByIDLocked(activeGroup.ID)
+		Symbols = append([]string(nil), activeGroup.Symbols...)
+	}
+	return nil
+}
+
+func cloneGroup(g GroupSpec) GroupSpec { g.Symbols = append([]string(nil), g.Symbols...); return g }
+func groupByIDLocked(id string) GroupSpec {
+	for _, g := range Groups {
+		if g.ID == id {
+			return cloneGroup(g)
+		}
+	}
+	for _, g := range customGroups {
+		if g.ID == id {
+			return cloneGroup(g)
+		}
+	}
+	return cloneGroup(Groups[0])
+}
+func customSymbols(s []string) bool {
+	return len(s) == 2 && watchlist.IsSymbol(s[0]) && watchlist.IsSymbol(s[1])
+}
+func TickerFor(s string) string {
+	if t, ok := Tickers[s]; ok {
+		return t
+	}
+	if watchlist.IsSymbol(s) {
+		return map[string]string{".SS": "SSE:", ".SZ": "SZSE:", ".BJ": "BSE:"}[s[6:]] + s[:6]
+	}
+	return s
+}
+
+func parseCustomQuoteBatch(symbols []string, body []byte, rtt float64, now time.Time) (map[string]SymbolResult, error) {
+	if len(body) > MaxBody {
+		return nil, fmt.Errorf("行情响应超过限制")
+	}
+	vars := make(map[string]string)
+	for _, s := range symbols {
+		if t, ok := watchlist.TencentSymbol(s); ok {
+			vars["v_"+t] = s
+		}
+	}
+	out := make(map[string]SymbolResult, len(symbols))
+	zone := time.FixedZone("CST", 8*3600)
+	for _, line := range strings.Split(string(body), ";") {
+		key, val, ok := strings.Cut(strings.TrimSpace(line), "=")
+		sym, expected := vars[strings.TrimSpace(key)]
+		if !ok || !expected {
+			continue
+		}
+		if _, duplicate := out[sym]; duplicate {
+			out[sym] = SymbolResult{Err: "重复的股票行情"}
+			continue
+		}
+		parts := strings.Split(strings.Trim(strings.TrimSpace(val), "\""), "~")
+		result := func() SymbolResult {
+			if len(parts) < 62 || parts[2] != sym[:6] {
+				return SymbolResult{Err: "不存在该股票或行情代码不匹配"}
+			}
+			kind := strings.TrimSpace(parts[61])
+			if !(strings.HasPrefix(kind, "GP-A") || (strings.HasSuffix(sym, ".BJ") && kind == "GP")) {
+				return SymbolResult{Err: "请输入中国市场A股代码，不能使用基金或指数代码"}
+			}
+			name, err := decodeQuoteName(parts[1])
+			if err != nil || strings.TrimSpace(name) == "" || len([]rune(name)) > 64 || strings.ContainsAny(name, "\x00\r\n\t") {
+				return SymbolResult{Err: "股票名称无效"}
+			}
+			price, e1 := strconv.ParseFloat(parts[3], 64)
+			prev, e2 := strconv.ParseFloat(parts[4], 64)
+			at, e3 := time.ParseInLocation("20060102150405", parts[30], zone)
+			if e1 != nil || e2 != nil || e3 != nil || at.After(now.Add(30*time.Second)) {
+				return SymbolResult{Err: "股票价格或行情时间无效"}
+			}
+			if price == 0 && prev > 0 {
+				price = prev
+			} // suspended stock: retain the previous close
+			state, label := resolveMainlandSession(now, at.Unix())
+			change := price - prev
+			q := Quote{Symbol: sym, Alias: strings.TrimSpace(name), Description: strings.TrimSpace(name), Price: price, RegularPrice: prev, ChangeAbs: change, ChangePercent: change / prev * 100, Currency: "CNY", QuoteType: "EQUITY", State: state, Session: label, TradeTime: at.Unix(), QuoteSource: "Tencent Finance", UpdateMode: "cn_stock_quote", RTTMs: rtt, MarketState: "CLOSED"}
+			if state == StateRegular {
+				q.MarketState = "REGULAR"
+			} else if state == StatePreMarket {
+				q.MarketState = "PRE"
+			}
+			if err := ValidateQuote(q); err != nil {
+				return SymbolResult{Err: err.Error()}
+			}
+			return SymbolResult{Quote: &q}
+		}()
+		out[sym] = result
+	}
+	good := false
+	for _, s := range symbols {
+		r, ok := out[s]
+		if !ok {
+			out[s] = SymbolResult{Err: "未找到该股票，请核对代码或新旧代码"}
+		} else if r.Quote != nil {
+			good = true
+		}
+	}
+	if !good {
+		return out, fmt.Errorf("未获取到有效A股行情")
+	}
+	return out, nil
+}

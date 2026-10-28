@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hrthas-king/PulseBar/internal/watchlist"
 )
 
 const (
@@ -145,27 +147,21 @@ var (
 )
 
 func ValidGroup(id string) bool {
-	for _, g := range Groups {
-		if g.ID == id {
-			return true
-		}
-	}
-	return false
+	groupMu.RLock()
+	defer groupMu.RUnlock()
+	return groupByIDLocked(id).ID == id
 }
 
 func GroupByID(id string) GroupSpec {
-	for _, g := range Groups {
-		if g.ID == id {
-			return g
-		}
-	}
-	return Groups[0]
+	groupMu.RLock()
+	defer groupMu.RUnlock()
+	return groupByIDLocked(id)
 }
 
 func SetActiveGroup(id string) GroupSpec {
-	g := GroupByID(id)
 	groupMu.Lock()
-	activeGroup = g
+	g := groupByIDLocked(id)
+	activeGroup = cloneGroup(g)
 	Symbols = append([]string(nil), g.Symbols...)
 	groupMu.Unlock()
 	return g
@@ -173,7 +169,7 @@ func SetActiveGroup(id string) GroupSpec {
 
 func ActiveGroup() GroupSpec {
 	groupMu.RLock()
-	g := activeGroup
+	g := cloneGroup(activeGroup)
 	groupMu.RUnlock()
 	return g
 }
@@ -261,7 +257,7 @@ func (q Quote) DisplayName() string {
 }
 
 func ValidateQuote(q Quote) error {
-	if _, ok := Tickers[q.Symbol]; !ok {
+	if _, ok := Tickers[q.Symbol]; !ok && !watchlist.IsSymbol(q.Symbol) {
 		return fmt.Errorf("标的不匹配 (%s)", q.Symbol)
 	}
 	for _, v := range []float64{q.Price, q.ChangePercent, q.ChangeAbs, q.RTTMs} {
@@ -710,6 +706,9 @@ func TencentQueryForSymbols(symbols []string) (string, bool) {
 	for _, s := range symbols {
 		t, ok := tencentSymbolMap[s]
 		if !ok {
+			t, ok = watchlist.TencentSymbol(s)
+		}
+		if !ok {
 			return "", false
 		}
 		q = append(q, t)
@@ -719,6 +718,9 @@ func TencentQueryForSymbols(symbols []string) (string, bool) {
 
 // ParseTencentQuoteBatch 解析腾讯行情接口 (qt.gtimg.cn) 返回的行情数据。
 func ParseTencentQuoteBatch(expectedSymbols []string, body []byte, rttMs float64, now time.Time) (map[string]SymbolResult, error) {
+	if customSymbols(expectedSymbols) {
+		return parseCustomQuoteBatch(expectedSymbols, body, rttMs, now)
+	}
 	if len(body) > MaxBody {
 		return nil, fmt.Errorf("响应超过 %d 字节上限", MaxBody)
 	}
@@ -1227,6 +1229,9 @@ type View struct {
 }
 
 func (v View) DisplayName() string {
+	if watchlist.IsSymbol(v.Symbol) && v.Quote != nil {
+		return v.Quote.DisplayName()
+	}
 	if isTrackedSZETF(v.Symbol) {
 		return AliasFor(v.Symbol)
 	}
@@ -1306,13 +1311,13 @@ func (v View) Tooltip() string {
 				description = commodityDescriptions[v.Symbol]
 			}
 		} else {
-			description = fmt.Sprintf("%s (%s)", description, Tickers[v.Symbol])
+			description = fmt.Sprintf("%s (%s)", description, TickerFor(v.Symbol))
 		}
 		return fmt.Sprintf("%s %s: %.*f (%+.2f%%, 涨跌 %+.*f, 常规收盘 %.*f) | %s\n  %s；时段: %s %s%s%s；%s",
 			stateBadge, name, decimals, v.Quote.Price, v.Quote.ChangePercent, decimals, v.Quote.ChangeAbs, decimals, v.Quote.RegularPrice, status,
 			description, stateBadge, session, srcInfo, tradeInfo, fetched)
 	}
-	description := Tickers[v.Symbol]
+	description := TickerFor(v.Symbol)
 	if isTrackedSZETF(v.Symbol) {
 		description = commodityDescriptions[v.Symbol]
 	}

@@ -127,6 +127,9 @@ func run(diagnose, runFor time.Duration, output string, probe, dockLeft, showDia
 
 	var latest atomic.Pointer[app.Snapshot]
 	settings := config.Load()
+	if err := market.SetCustomPairs(settings.CustomPairs); err != nil {
+		return err
+	}
 	market.SetActiveGroup(settings.MarketGroup)
 	if dockLeft {
 		settings.Placement = "left"
@@ -179,6 +182,8 @@ func run(diagnose, runFor time.Duration, output string, probe, dockLeft, showDia
 					select {
 					case <-ctx.Done():
 						return
+					case group := <-barUI.GroupChanges:
+						sendLatestGroup(engine.Group, group)
 					case action := <-barUI.Actions:
 						switch action {
 						case ui.ActionExit:
@@ -206,10 +211,7 @@ func run(diagnose, runFor time.Duration, output string, probe, dockLeft, showDia
 							}
 						default:
 							if grp, ok := ui.GroupForAction(action); ok {
-								select {
-								case engine.Group <- grp:
-								default:
-								}
+								sendLatestGroup(engine.Group, grp)
 							}
 						}
 					}
@@ -266,4 +268,20 @@ func run(diagnose, runFor time.Duration, output string, probe, dockLeft, showDia
 		fmt.Println(string(data))
 	}
 	return nil
+}
+
+func sendLatestGroup(channel chan string, group string) {
+	select {
+	case channel <- group:
+		return
+	default:
+	}
+	select {
+	case <-channel:
+	default:
+	}
+	select {
+	case channel <- group:
+	default:
+	}
 }

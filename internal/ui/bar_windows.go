@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"unicode/utf16"
@@ -254,6 +255,7 @@ type UI struct {
 	trayAdded      bool
 	taskbarMessage uint32
 	latest         atomic.Pointer[app.Snapshot]
+	desiredGroup   atomic.Value
 	updatePending  atomic.Bool
 	startup        atomic.Bool
 	cfg            config.Config
@@ -263,6 +265,13 @@ type UI struct {
 	hoverTracking  bool
 	tooltipVisible bool
 	Actions        chan Action
+	GroupChanges   chan string
+	customPanel    *customPanel
+	customEpoch    uint64
+	customCancel   context.CancelFunc
+	customResults  chan pairValidation
+	saveSettings   func(config.Config) error
+	validatePair   pairValidator
 	callback       uintptr
 }
 
@@ -271,13 +280,18 @@ func NewUI(version string, cfg config.Config) *UI {
 		cfg.UIScalePercent = config.DefaultUIScalePercent
 	}
 	u := &UI{
-		version:  version,
-		cfg:      cfg,
-		dpiScale: 1.0,
-		scale:    float64(cfg.UIScalePercent) / 100.0,
-		icons:    make(map[string]uintptr),
-		Actions:  make(chan Action, 16),
+		version:       version,
+		cfg:           cfg,
+		dpiScale:      1.0,
+		scale:         float64(cfg.UIScalePercent) / 100.0,
+		icons:         make(map[string]uintptr),
+		Actions:       make(chan Action, 16),
+		GroupChanges:  make(chan string, 1),
+		customResults: make(chan pairValidation, 8),
+		saveSettings:  config.Save,
+		validatePair:  market.ValidateCustomPair,
 	}
+	u.desiredGroup.Store(cfg.MarketGroup)
 	return u
 }
 
@@ -304,7 +318,13 @@ func (u *UI) SetAutostart(enabled bool) { u.startup.Store(enabled) }
 func (u *UI) Config() config.Config     { return u.cfg }
 
 func (u *UI) Publish(s app.Snapshot) {
+	if desired, ok := u.desiredGroup.Load().(string); ok && desired != "" && s.MarketGroup != desired {
+		return
+	}
 	u.latest.Store(&s)
+	if u.hwnd == 0 {
+		return
+	}
 	if !u.updatePending.Swap(true) {
 		ok, _, _ := postMessage.Call(u.hwnd, wmUpdate, 0, 0)
 		if ok == 0 {
@@ -746,7 +766,7 @@ func (u *UI) menu() {
 	defer destroyMenu.Call(menu)
 
 	add := func(id Action, label string, flags uintptr) {
-		p := winapi.UTF16(label)
+		p := winapi.UTF16(strings.ReplaceAll(label, "&", "&&"))
 		appendMenu.Call(menu, flags, uintptr(id), uintptr(unsafe.Pointer(p)))
 	}
 
@@ -805,17 +825,24 @@ func (u *UI) menu() {
 		}
 	}
 	// 第一行直接显示当前选中的标的对（如：✔ 标普 / 纳指 (VOO / QQQ)）
-	add(Action(uint32(ActionGroupVOOQQQ)+uint32(activeIdx)), market.Groups[activeIdx].MenuLabel, 8)
+	currentSpec := market.GroupByID(currentGroup)
+	if currentSpec.ID == market.Groups[activeIdx].ID {
+		add(Action(uint32(ActionGroupVOOQQQ)+uint32(activeIdx)), currentSpec.MenuLabel, 8)
+	} else {
+		add(0, currentSpec.MenuLabel, 8|2)
+	}
+	customCommands := make(map[Action]customMenuCommand)
 	// 第二行显示可折叠的 More 子菜单，点开后展示其余所有指数/标的
 	moreMenu, _, _ := createMenu.Call()
 	if moreMenu != 0 {
 		for i, g := range market.Groups {
-			if i == activeIdx {
+			if g.ID == currentGroup {
 				continue
 			}
 			p := winapi.UTF16(g.MenuLabel)
 			appendMenu.Call(moreMenu, 0, uintptr(uint32(ActionGroupVOOQQQ)+uint32(i)), uintptr(unsafe.Pointer(p)))
 		}
+		u.appendCustomMenu(moreMenu, customCommands)
 		moreTitle := winapi.UTF16("More (更多行情标的)")
 		appendMenu.Call(menu, 0x10, moreMenu, uintptr(unsafe.Pointer(moreTitle)))
 	}
@@ -879,7 +906,21 @@ func (u *UI) menu() {
 	postMessage.Call(u.hwnd, 0, 0, 0)
 	u.callNotify(3)
 	if cmd != 0 {
-		u.handleAction(Action(cmd))
+		if command, ok := customCommands[Action(cmd)]; ok {
+			var err error
+			if command.remove {
+				err = u.deleteCustomPair(command.id)
+			} else {
+				err = u.selectCustomPair(command.id)
+			}
+			if err != nil {
+				ShowError(err)
+			}
+		} else if Action(cmd) == actionAddCustom {
+			u.openCustomPanel(true)
+		} else {
+			u.handleAction(Action(cmd))
+		}
 	}
 }
 
@@ -925,6 +966,7 @@ func (u *UI) handleAction(act Action) {
 		}
 		if grp, ok := GroupForAction(act); ok {
 			u.cfg.MarketGroup = grp
+			u.desiredGroup.Store(grp)
 			_ = config.Save(u.cfg)
 			spec := market.SetActiveGroup(grp)
 			if s := u.latest.Load(); s != nil {
@@ -961,6 +1003,9 @@ func (u *UI) windowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintpt
 		return 0
 	}
 	switch msg {
+	case wmCustomResult:
+		u.handleCustomResults()
+		return 0
 	case 0x000F: // WM_PAINT
 		u.paint(hwnd)
 		return 0
@@ -1142,6 +1187,7 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	}
 	u.hwnd = hwnd
 	defer destroyWindow.Call(hwnd)
+	defer u.closeCustomPanel()
 
 	setLayeredAttrs.Call(hwnd, colorRef(1, 1, 1), 255, 1) // LWA_COLORKEY = 1
 

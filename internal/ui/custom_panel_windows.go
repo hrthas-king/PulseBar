@@ -16,6 +16,7 @@ var (
 	getWindowText    = user32.NewProc("GetWindowTextW")
 	enableWindow     = user32.NewProc("EnableWindow")
 	setFocus         = user32.NewProc("SetFocus")
+	panelForeground  = user32.NewProc("GetForegroundWindow")
 	getAsyncKeyState = user32.NewProc("GetAsyncKeyState")
 	panelSetTimer    = user32.NewProc("SetTimer")
 	callWindowProc   = user32.NewProc("CallWindowProcW")
@@ -31,6 +32,7 @@ type customPanel struct {
 	hwnd, first, second, submit, status uintptr
 	busy                                bool
 	outsideArmed                        bool
+	focusEstablished                    bool
 }
 type editBinding struct {
 	panel    *customPanel
@@ -140,7 +142,10 @@ func (u *UI) openCustomPanel(show bool) {
 	if show {
 		showWindow.Call(hwnd, 5)
 		setForeground.Call(hwnd)
+		setWindowPos.Call(hwnd, ^uintptr(0), 0, 0, 0, 0, 0x1|0x2|0x40)
 		setFocus.Call(p.first)
+		active, _, _ := panelForeground.Call()
+		p.focusEstablished = active == hwnd
 		panelSetTimer.Call(hwnd, 1, 50, 0)
 	}
 }
@@ -150,6 +155,10 @@ func customPanelProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		p := value.(*customPanel)
 		switch msg {
 		case 0x0113: // WM_TIMER: also catch clicks on non-activating taskbar windows.
+			active, _, _ := panelForeground.Call()
+			if active == hwnd {
+				p.focusEstablished = true
+			}
 			var cursor point
 			getCursor.Call(uintptr(unsafe.Pointer(&cursor)))
 			left, _, _ := getAsyncKeyState.Call(1)
@@ -157,7 +166,9 @@ func customPanelProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 			p.outsideClick(cursor, (left|right)&0x8000 != 0)
 			return 0
 		case 0x0006: // WM_ACTIVATE
-			if wp&0xffff == 0 {
+			// Initial activation may fail while the native menu/shell is releasing focus.
+			// Only a genuine foreground-to-background transition is a dismissal.
+			if wp&0xffff == 0 && p.focusEstablished {
 				p.u.closeCustomPanel()
 			}
 			return 0
@@ -211,6 +222,12 @@ func customEditProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		return r
 	}
 	b := value.(editBinding)
+	if msg == 0x0007 {
+		active, _, _ := panelForeground.Call()
+		if active == b.panel.hwnd {
+			b.panel.focusEstablished = true
+		}
+	}
 	if msg == 0x0102 && (wp == 13 || wp == 27 || wp == 9) {
 		return 0
 	}

@@ -11,7 +11,7 @@
 
 **合二为一的极轻量 Windows 任务栏网络脉搏（GeoPulse）与 VOO / QQQ 24小时全时段实时行情条（TickBar）。**
 
-当前版本：**v0.7.0（2026-10-28）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.7.0)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
+当前版本：**v0.7.1（2026-10-28）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.7.1)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
 
 双击单个 `~3.4 MiB`（amd64 本地构建）的 `.exe` 即可静默运行，同时在 **任务栏最左侧悬浮条** 与 **系统托盘** 展示：
 1. **GeoPulse 秒级网络感知**：公网出口两位国家代码、连通性状态灯（绿/黄/红）、上下行实时流量活动箭头（或一键展开实时网速与 HTTPS 请求延迟）、TUN/系统代理节点切换自动感知。
@@ -85,11 +85,11 @@
 git clone https://github.com/hrthas-king/PulseBar.git
 cd PulseBar
 ./scripts/verify.ps1
-./scripts/build.ps1 -Arch amd64 -Version v0.7.0
+./scripts/build.ps1 -Arch amd64 -Version v0.7.1
 ./dist/PulseBar-windows-amd64.exe
 ```
 
-`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.7.0`。如需更新本机根目录运行副本：
+`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.7.1`。如需更新本机根目录运行副本：
 
 ```powershell
 Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
@@ -118,7 +118,7 @@ Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
 
 ```powershell
 ./scripts/generate-icons.ps1
-./scripts/package.ps1 -Version v0.7.0
+./scripts/package.ps1 -Version v0.7.1
 ```
 
 ---

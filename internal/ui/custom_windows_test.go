@@ -154,6 +154,38 @@ func TestCustomSelectionRejectsPriorSnapshot(t *testing.T) {
 	}
 }
 
+func TestAddSelectionDoesNotOpenInsideMenuCleanup(t *testing.T) {
+	if wmShowCustom == winapi.WMDockLeft || wmShowCustom == winapi.WMDiag || wmShowCustom == wmCustomResult {
+		t.Fatal("panel message collides with an existing window command")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	u := NewUI("test", config.Default())
+	defer u.closeCustomPanel()
+	u.handleMenuSelection(uintptr(actionAddCustom), nil)
+	var msg message
+	peek := user32.NewProc("PeekMessageW")
+	n, _, _ := peek.Call(uintptr(unsafe.Pointer(&msg)), 0, wmShowCustom, wmShowCustom, 1)
+	if n == 0 || u.customPanel != nil {
+		t.Fatal("Add opened synchronously instead of scheduling the input after native menu cleanup")
+	}
+}
+
+func TestInitialPanelDeactivationDoesNotDismiss(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	u := NewUI("test", config.Default())
+	u.openCustomPanel(false)
+	defer u.closeCustomPanel()
+	if u.customPanel == nil {
+		t.Fatal("no panel")
+	}
+	sendMessage.Call(u.customPanel.hwnd, 6, 0, 0)
+	if u.customPanel == nil {
+		t.Fatal("initial activation transition dismissed the new input panel")
+	}
+}
+
 func TestNativeOtherMenuHasDirectSelectionAndSideDelete(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -249,6 +281,7 @@ func TestNativeCustomPanelEnterOutsideCloseAndStaleResult(t *testing.T) {
 	}
 	u.openCustomPanel(false)
 	oldEpoch := u.customEpoch
+	u.customPanel.focusEstablished = true
 	sendMessage.Call(u.customPanel.hwnd, 6, 0, 0) // actual WM_ACTIVATE inactive path
 	if u.customPanel != nil {
 		t.Fatal("outside activation did not close")

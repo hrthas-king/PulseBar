@@ -17,6 +17,7 @@ import (
 
 const actionAddCustom Action = 2001
 const wmCustomResult = 0x8003
+const wmShowCustom = 0x8010
 
 type customMenuCommand struct {
 	id     string

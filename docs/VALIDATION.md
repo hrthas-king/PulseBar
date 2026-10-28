@@ -1,6 +1,24 @@
 # 验证记录 (Validation)
 
-## v0.7.0：其他（自定义A股）（最新）
+## v0.7.1：新增面板显示与激活修复（最新）
+
+验证日期：**2026-10-28 美东时间**。
+
+- 旧版在原生菜单返回路径内同步打开面板，且此前已调用 `NIM_SETFOCUS`。根据 [Microsoft 文档](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyiconw)，该操作会把焦点交回任务栏通知区域；初始化失焦又可能触发面板立即销毁。
+- 两个确定性回归测试在旧版失败，分别覆盖菜单清理阶段不能同步打开输入窗，以及初始化失焦不应关闭新窗；修复后通过。
+- 独立正常 Windows 会话中的可见窗口测试，调用菜单选择后的处理链并运行消息循环，核对面板保持可见、输入控件已设置焦点，连续三次通过。系统是否允许应用成为全局前台仍受 Windows 前台限制规则影响，测试不强制抢占其他应用。
+- 保留面板真正取得前台后再失焦关闭、外部点击关闭、Esc、Enter、异步校验与保存等原有测试。临时诊断日志代码已清除。
+- 默认完整测试 **44 项**（含子项共 **70 项**）、静态检查、格式检查及 amd64 / arm64 构建均通过。两个需真实网络/交互桌面的测试默认跳过；可见窗口测试已在正常会话单独运行三次。
+- 本机根目录与 dist 已更新为 v0.7.1，重启前后实际用户配置文件校验值一致。用户在实际桌面再次点击“+ 新增组合”，已确认输入面板正常出现。
+
+本轮本机产物 SHA-256（GitHub Actions 工具链不同，可能产生不同哈希）：
+
+```text
+834C9C4E828D9809208CC220270916EBCDDB36437349C1295A6ED7F2C628BB34  PulseBar.exe / dist/PulseBar-windows-amd64.exe
+587E63002436D8846006A0EF30D3CC4C29080B4A6EAD3947678F567008E2D539  dist/PulseBar-windows-arm64.exe
+```
+
+## v0.7.0：其他（自定义A股）（历史）
 
 验证日期：**2026-10-28 美东时间**。默认完整测试 **42 项**（含子项共 **68 项**）通过；`go vet`、格式检查与 Windows amd64 / arm64 构建通过。另有一个默认跳过的真实行情集成测试，已在正常 Windows 会话中单独开启并通过。
 
@@ -184,8 +202,8 @@ $env:GOTMPDIR = $validationTemp
 `verify.ps1` 会生成 `dev` 版本的检查程序。完成后使用明确版本重新构建，并同步根目录运行副本：
 
 ```powershell
-./scripts/build.ps1 -Arch amd64 -Version v0.7.0
-./scripts/build.ps1 -Arch arm64 -Version v0.7.0
+./scripts/build.ps1 -Arch amd64 -Version v0.7.1
+./scripts/build.ps1 -Arch arm64 -Version v0.7.1
 Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
 ./PulseBar.exe --version
 Get-FileHash ./PulseBar.exe, ./dist/PulseBar-windows-amd64.exe -Algorithm SHA256
@@ -194,8 +212,8 @@ Get-FileHash ./PulseBar.exe, ./dist/PulseBar-windows-amd64.exe -Algorithm SHA256
 在允许网络探针的正常桌面环境中执行新的运行实测：
 
 ```powershell
-Start-Process ./PulseBar.exe -ArgumentList '--diagnose=10s --output .artifacts/diagnose-v0.7.0.json' -WindowStyle Hidden -Wait
-Start-Process ./PulseBar.exe -ArgumentList '--run-for=10s --output .artifacts/smoke-v0.7.0.json' -WindowStyle Hidden -Wait
+Start-Process ./PulseBar.exe -ArgumentList '--diagnose=10s --output .artifacts/diagnose-v0.7.1.json' -WindowStyle Hidden -Wait
+Start-Process ./PulseBar.exe -ArgumentList '--run-for=10s --output .artifacts/smoke-v0.7.1.json' -WindowStyle Hidden -Wait
 ```
 
 GUI 冒烟前需先退出已有实例，避免单实例机制跳过新运行。诊断 JSON 可能包含公网 IP，提交或公开分享前应脱敏。
@@ -203,5 +221,5 @@ GUI 冒烟前需先退出已有实例，避免单实例机制跳过新运行。�
 如需重新生成本地分发包：
 
 ```powershell
-./scripts/package.ps1 -Version v0.7.0
+./scripts/package.ps1 -Version v0.7.1
 ```

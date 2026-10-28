@@ -904,6 +904,15 @@ func (u *UI) menu() {
 	setForeground.Call(u.hwnd)
 	cmd, _, _ := trackMenu.Call(menu, 0x100|2, uintptr(p.X), uintptr(p.Y), 0, u.hwnd, 0)
 	postMessage.Call(u.hwnd, 0, 0, 0)
+	u.handleMenuSelection(cmd, customCommands)
+}
+
+func (u *UI) handleMenuSelection(cmd uintptr, customCommands map[Action]customMenuCommand) {
+	if Action(cmd) == actionAddCustom {
+		// Let the native menu finish before opening a window that needs keyboard focus.
+		postMessage.Call(u.hwnd, wmShowCustom, 0, 0)
+		return
+	}
 	u.callNotify(3)
 	if cmd != 0 {
 		if command, ok := customCommands[Action(cmd)]; ok {
@@ -916,8 +925,6 @@ func (u *UI) menu() {
 			if err != nil {
 				ShowError(err)
 			}
-		} else if Action(cmd) == actionAddCustom {
-			u.openCustomPanel(true)
 		} else {
 			u.handleAction(Action(cmd))
 		}
@@ -1003,6 +1010,9 @@ func (u *UI) windowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintpt
 		return 0
 	}
 	switch msg {
+	case wmShowCustom:
+		u.openCustomPanel(true)
+		return 0
 	case wmCustomResult:
 		u.handleCustomResults()
 		return 0

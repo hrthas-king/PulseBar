@@ -43,3 +43,15 @@ func TestConfigRoundTrip(t *testing.T) {
 		t.Fatalf("expected invalid_group to be invalid")
 	}
 }
+
+func TestETFGroupConfigRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	c := Default()
+	c.MarketGroup = "etf_159632_159655"
+	if err := SaveTo(path, c); err != nil {
+		t.Fatalf("save ETF group: %v", err)
+	}
+	if got := LoadFrom(path).MarketGroup; got != c.MarketGroup {
+		t.Fatalf("saved ETF group %q loaded as %q", c.MarketGroup, got)
+	}
+}

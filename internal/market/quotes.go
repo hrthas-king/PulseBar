@@ -21,15 +21,16 @@ const (
 )
 
 const (
-	GroupVOOQQQ      = "voo_qqq"
-	GroupSOXXSMH     = "soxx_smh"
-	GroupTop2US      = "top2_us"
-	GroupGoldOil     = "gold_oil"
-	GroupCNIndices   = "cn_indices"
-	GroupHKIndices   = "hk_indices"
-	GroupAsiaIndices = "asia_indices"
-	GroupEUIndices   = "eu_indices"
-	DefaultGroup     = GroupVOOQQQ
+	GroupVOOQQQ          = "voo_qqq"
+	GroupSOXXSMH         = "soxx_smh"
+	GroupTop2US          = "top2_us"
+	GroupGoldOil         = "gold_oil"
+	GroupCNIndices       = "cn_indices"
+	GroupHKIndices       = "hk_indices"
+	GroupAsiaIndices     = "asia_indices"
+	GroupEUIndices       = "eu_indices"
+	GroupETF159632159655 = "etf_159632_159655"
+	DefaultGroup         = GroupVOOQQQ
 )
 
 // SessionState 表示五态交易时段状态信号。
@@ -74,6 +75,7 @@ var Groups = []GroupSpec{
 	{ID: GroupHKIndices, MenuLabel: "港股指数 (恒指 / 恒科)", Symbols: []string{"^HSI", "^HSTECH"}},
 	{ID: GroupAsiaIndices, MenuLabel: "日韩指数 (日经225 / 韩国综合)", Symbols: []string{"^N225", "^KS11"}},
 	{ID: GroupEUIndices, MenuLabel: "欧洲指数 (法国CAC / 德国DAX)", Symbols: []string{"^FCHI", "^GDAXI"}},
+	{ID: GroupETF159632159655, MenuLabel: "纳斯达克 / 标普 ETF (159632 / 159655)", Symbols: []string{"159632.SZ", "159655.SZ"}},
 }
 
 var (
@@ -98,6 +100,8 @@ var (
 		"^KS11":     "韩指",
 		"^FCHI":     "CAC40",
 		"^GDAXI":    "DAX",
+		"159632.SZ": "159632",
+		"159655.SZ": "159655",
 	}
 
 	Tickers = map[string]string{
@@ -117,6 +121,8 @@ var (
 		"^KS11":     "KRX:KS11",
 		"^FCHI":     "Euronext:CAC40",
 		"^GDAXI":    "XETRA:DAX",
+		"159632.SZ": "SZSE:159632",
+		"159655.SZ": "SZSE:159655",
 	}
 
 	allowedCurrencies = map[string]bool{
@@ -184,6 +190,18 @@ func AliasFor(symbol string) string {
 		return a
 	}
 	return symbol
+}
+
+func isTrackedSZETF(symbol string) bool {
+	return symbol == "159632.SZ" || symbol == "159655.SZ"
+}
+
+// PriceDecimals returns the number of decimal places used for displayed prices.
+func PriceDecimals(symbol string) int {
+	if isTrackedSZETF(symbol) {
+		return 3
+	}
+	return 2
 }
 
 func normalizeSymbol(sym string) string {
@@ -487,6 +505,25 @@ func resolveCNHKSession(sym string, now time.Time, tradeTime int64) (SessionStat
 	if wd == time.Saturday || wd == time.Sunday {
 		return StateClosed, "周末休市"
 	}
+	if isTrackedSZETF(sym) {
+		mins := local.Hour()*60 + local.Minute()
+		switch {
+		case mins >= 9*60+15 && mins < 9*60+30:
+			return StatePreMarket, "集合竞价 (Pre-Market)"
+		case (mins >= 9*60+30 && mins < 11*60+30) || (mins >= 13*60 && mins < 15*60):
+			if tradeTime > 0 {
+				tLocal := time.Unix(tradeTime, 0).In(cstZone)
+				if tLocal.Year() != local.Year() || tLocal.YearDay() != local.YearDay() {
+					return StateClosed, "休市或行情日期未更新"
+				}
+			}
+			return StateRegular, "盘中 (Regular)"
+		case mins >= 11*60+30 && mins < 13*60:
+			return StateClosed, "午间休市 (Lunch Break)"
+		default:
+			return StateClosed, "休市 (Closed)"
+		}
+	}
 	if tradeTime > 0 {
 		tLocal := time.Unix(tradeTime, 0).In(cstZone)
 		if tLocal.Year() != local.Year() || tLocal.YearDay() != local.YearDay() {
@@ -523,7 +560,7 @@ func resolveCNHKSession(sym string, now time.Time, tradeTime int64) (SessionStat
 
 func currencyForSymbol(sym string) string {
 	switch sym {
-	case "000001.SS", "399006.SZ":
+	case "000001.SS", "399006.SZ", "159632.SZ", "159655.SZ":
 		return "CNY"
 	case "^HSI", "^HSTECH":
 		return "HKD"
@@ -540,7 +577,7 @@ func currencyForSymbol(sym string) string {
 
 func resolveIndexSession(sym string, now time.Time, tradeTime int64) (SessionState, string) {
 	switch sym {
-	case "000001.SS", "399006.SZ", "^HSI", "^HSTECH":
+	case "000001.SS", "399006.SZ", "159632.SZ", "159655.SZ", "^HSI", "^HSTECH":
 		return resolveCNHKSession(sym, now, tradeTime)
 	case "^N225":
 		jstZone := time.FixedZone("JST", 9*3600)
@@ -614,6 +651,8 @@ func resolveIndexSession(sym string, now time.Time, tradeTime int64) (SessionSta
 var tencentSymbolMap = map[string]string{
 	"000001.SS": "sh000001",
 	"399006.SZ": "sz399006",
+	"159632.SZ": "sz159632",
+	"159655.SZ": "sz159655",
 	"^HSI":      "r_hkHSI",
 	"^HSTECH":   "r_hkHSTECH",
 	"GC=F":      "hf_GC",
@@ -627,6 +666,8 @@ var tencentSymbolMap = map[string]string{
 var tencentVarToSymbol = map[string]string{
 	"v_sh000001":   "000001.SS",
 	"v_sz399006":   "399006.SZ",
+	"v_sz159632":   "159632.SZ",
+	"v_sz159655":   "159655.SZ",
 	"v_r_hkHSI":    "^HSI",
 	"v_hkHSI":      "^HSI",
 	"v_r_hkHSTECH": "^HSTECH",
@@ -648,6 +689,8 @@ var commodityDescriptions = map[string]string{
 	"BZ=F":      "ICE 布伦特原油 (Brent Crude)",
 	"000001.SS": "上证综合指数 (SSE Composite)",
 	"399006.SZ": "创业板指数 (ChiNext)",
+	"159632.SZ": "纳斯达克ETF华安 (QDII)",
+	"159655.SZ": "标普500ETF华夏 (QDII)",
 	"^HSI":      "恒生指数 (Hang Seng Index)",
 	"^HSTECH":   "恒生科技指数 (Hang Seng TECH Index)",
 	"^N225":     "日经225指数 (Nikkei 225)",
@@ -671,7 +714,7 @@ func TencentQueryForSymbols(symbols []string) (string, bool) {
 	return strings.Join(q, ","), true
 }
 
-// ParseTencentQuoteBatch 解析腾讯行情接口 (qt.gtimg.cn) 返回的 0 秒级实时行情。
+// ParseTencentQuoteBatch 解析腾讯行情接口 (qt.gtimg.cn) 返回的行情数据。
 func ParseTencentQuoteBatch(expectedSymbols []string, body []byte, rttMs float64, now time.Time) (map[string]SymbolResult, error) {
 	if len(body) > MaxBody {
 		return nil, fmt.Errorf("响应超过 %d 字节上限", MaxBody)
@@ -841,9 +884,29 @@ func ParseTencentQuoteBatch(expectedSymbols []string, body []byte, rttMs float64
 			} else if t, err := time.ParseInLocation("2006/01/02 15:04:05", tsRaw, cstZone); err == nil {
 				tradeTime = t.Unix()
 			}
+			if isTrackedSZETF(sym) {
+				if strings.TrimSpace(parts[2]) != strings.TrimSuffix(sym, ".SZ") {
+					out[sym] = SymbolResult{Err: "ETF 行情代码不匹配"}
+					continue
+				}
+				if tradeTime == 0 || tradeTime > now.Add(30*time.Second).Unix() {
+					out[sym] = SymbolResult{Err: "ETF 行情时间无效"}
+					continue
+				}
+			}
 
 			cur := currencyForSymbol(sym)
 			state, session := resolveIndexSession(sym, now, tradeTime)
+			quoteType, source, updateMode, marketState := "INDEX", "Tencent Real Time", "cnhk_realtime", "REGULAR"
+			if isTrackedSZETF(sym) {
+				quoteType, source, updateMode = "ETF", "Tencent Finance", "sz_etf_quote"
+				switch state {
+				case StatePreMarket:
+					marketState = "PRE"
+				case StateClosed:
+					marketState = "CLOSED"
+				}
+			}
 			desc := commodityDescriptions[sym]
 			if desc == "" {
 				desc = AliasFor(sym)
@@ -857,12 +920,12 @@ func ParseTencentQuoteBatch(expectedSymbols []string, body []byte, rttMs float64
 				ChangeAbs:     changeAbs,
 				RegularPrice:  prevClose,
 				Currency:      cur,
-				QuoteType:     "INDEX",
-				MarketState:   "REGULAR",
+				QuoteType:     quoteType,
+				MarketState:   marketState,
 				State:         state,
 				TradeTime:     tradeTime,
-				QuoteSource:   "Tencent Real Time",
-				UpdateMode:    "cnhk_realtime",
+				QuoteSource:   source,
+				UpdateMode:    updateMode,
 				Session:       session,
 				Description:   desc,
 				RTTMs:         rttMs,
@@ -1182,6 +1245,9 @@ func (v View) EffectiveState() SessionState {
 
 func (v View) Tooltip() string {
 	status := "实时数据正常"
+	if isTrackedSZETF(v.Symbol) {
+		status = "行情数据正常"
+	}
 	if !v.Healthy {
 		status = "数据异常 — " + v.Reason
 	}
@@ -1205,18 +1271,31 @@ func (v View) Tooltip() string {
 			if tradeAge < 0 {
 				tradeAge = 0
 			}
+			if isTrackedSZETF(v.Symbol) {
+				local := time.Unix(v.Quote.TradeTime, 0).In(time.FixedZone("CST", 8*3600))
+				tradeInfo = fmt.Sprintf("；行情时间 %s（北京时间）", local.Format("2006-01-02 15:04:05"))
+			}
 			if tradeAge < 120 {
-				tradeInfo = fmt.Sprintf("；最近成交 %ds 前", tradeAge)
+				if isTrackedSZETF(v.Symbol) {
+					tradeInfo += fmt.Sprintf("；行情时间距今 %ds", tradeAge)
+				} else {
+					tradeInfo = fmt.Sprintf("；最近成交 %ds 前", tradeAge)
+				}
 			} else if tradeAge < 7200 {
-				tradeInfo = fmt.Sprintf("；最近成交 %dm%ds 前", tradeAge/60, tradeAge%60)
+				if isTrackedSZETF(v.Symbol) {
+					tradeInfo += fmt.Sprintf("；行情时间距今 %dm%ds", tradeAge/60, tradeAge%60)
+				} else {
+					tradeInfo = fmt.Sprintf("；最近成交 %dm%ds 前", tradeAge/60, tradeAge%60)
+				}
 			}
 		}
 		srcInfo := ""
 		if v.Quote.QuoteSource != "" {
 			srcInfo = "；数据源: " + v.Quote.QuoteSource
 		}
-		return fmt.Sprintf("%s %s: %.2f (%+.2f%%, 涨跌 %+.2f, 常规收盘 %.2f) | %s\n  %s (%s)；时段: %s %s%s%s；%s",
-			stateBadge, name, v.Quote.Price, v.Quote.ChangePercent, v.Quote.ChangeAbs, v.Quote.RegularPrice, status,
+		decimals := PriceDecimals(v.Symbol)
+		return fmt.Sprintf("%s %s: %.*f (%+.2f%%, 涨跌 %+.*f, 常规收盘 %.*f) | %s\n  %s (%s)；时段: %s %s%s%s；%s",
+			stateBadge, name, decimals, v.Quote.Price, v.Quote.ChangePercent, decimals, v.Quote.ChangeAbs, decimals, v.Quote.RegularPrice, status,
 			v.Quote.Description, Tickers[v.Symbol], stateBadge, session, srcInfo, tradeInfo, fetched)
 	}
 	return fmt.Sprintf("%s %s: %s\n  %s；%s；%s",

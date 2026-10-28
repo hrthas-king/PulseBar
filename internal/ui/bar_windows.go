@@ -35,6 +35,7 @@ const (
 	ActionGroupHKIndices
 	ActionGroupAsiaIndices
 	ActionGroupEUIndices
+	ActionGroupETF159632159655
 	ActionScale75
 	ActionScale85
 	ActionScale90
@@ -50,7 +51,7 @@ const (
 )
 
 func GroupForAction(act Action) (string, bool) {
-	if act < ActionGroupVOOQQQ || act > ActionGroupEUIndices {
+	if act < ActionGroupVOOQQQ || act > ActionGroupETF159632159655 {
 		return "", false
 	}
 	idx := int(act - ActionGroupVOOQQQ)
@@ -680,7 +681,7 @@ func (u *UI) paint(hwnd uintptr) {
 		pctColor := colorRef(170, 170, 170)
 		if v.Quote != nil {
 			pct := v.Quote.ChangePercent
-			text = fmt.Sprintf("%.2f %+.2f%%", v.Quote.Price, pct)
+			text = quotePriceChangeText(*v.Quote)
 			if math.Abs(pct) < 0.005 {
 				pctColor = colorRef(240, 240, 240)
 			} else if (pct > 0) == u.cfg.UpIsRed {
@@ -733,7 +734,7 @@ func (u *UI) showDiagnostics() {
 		snap = *p
 	}
 	report := DiagnosticsText(u.version, snap)
-	text, title := winapi.UTF16(report), winapi.UTF16("PulseBar — 网络与 VOO/QQQ 24h 行情诊断")
+	text, title := winapi.UTF16(report), winapi.UTF16("PulseBar — 网络与多市场行情诊断")
 	messageBox.Call(u.hwnd, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x40)
 }
 

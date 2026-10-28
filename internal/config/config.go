@@ -16,14 +16,15 @@ const (
 var UIScalePresets = []int{75, 85, 90, 100, 115, 130}
 
 var validMarketGroups = map[string]bool{
-	"voo_qqq":      true,
-	"soxx_smh":     true,
-	"top2_us":      true,
-	"gold_oil":     true,
-	"cn_indices":   true,
-	"hk_indices":   true,
-	"asia_indices": true,
-	"eu_indices":   true,
+	"voo_qqq":           true,
+	"soxx_smh":          true,
+	"top2_us":           true,
+	"gold_oil":          true,
+	"cn_indices":        true,
+	"hk_indices":        true,
+	"asia_indices":      true,
+	"eu_indices":        true,
+	"etf_159632_159655": true,
 }
 
 type Config struct {

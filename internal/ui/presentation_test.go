@@ -90,3 +90,33 @@ func TestLatencyDoesNotUseTunnelHeartbeat(t *testing.T) {
 		})
 	}
 }
+
+func TestShenzhenETFsDisplayThreeDecimalPrices(t *testing.T) {
+	first := market.Quote{Symbol: "159632.SZ", Alias: "159632", Price: 1.234, RegularPrice: 1.224, ChangeAbs: 0.010, ChangePercent: 0.82}
+	second := market.Quote{Symbol: "159655.SZ", Alias: "159655", Price: 1.876, RegularPrice: 1.877, ChangeAbs: -0.001, ChangePercent: -0.05}
+	views := []market.View{
+		{Symbol: first.Symbol, Alias: first.Alias, Quote: &first, Healthy: true},
+		{Symbol: second.Symbol, Alias: second.Alias, Quote: &second, Healthy: true},
+	}
+	snap := app.Snapshot{MarketGroup: "etf_159632_159655", Quotes: views}
+	if got := quotePriceChangeText(first); got != "1.234 +0.82%" {
+		t.Fatalf("taskbar ETF price=%q", got)
+	}
+	if got := QuoteSummary(snap); got != "159632 1.234 +0.82% | 159655 1.876 -0.05%" {
+		t.Fatalf("tray ETF summary=%q", got)
+	}
+	diag := DiagnosticsText("test", snap)
+	for _, expected := range []string{
+		"当前最新价: 1.234 (常规盘收盘: 1.224) | 涨跌额: +0.010",
+		"当前最新价: 1.876 (常规盘收盘: 1.877) | 涨跌额: -0.001",
+		"参考基准价: 1.224",
+		"参考基准价: 1.877",
+	} {
+		if !strings.Contains(diag, expected) {
+			t.Errorf("diagnostics missing %q:\n%s", expected, diag)
+		}
+	}
+	if got := quotePriceChangeText(market.Quote{Symbol: "VOO", Price: 699.051, ChangePercent: 0.07}); got != "699.05 +0.07%" {
+		t.Fatalf("existing ETF precision changed: %q", got)
+	}
+}

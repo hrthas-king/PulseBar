@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/hrthas-king/PulseBar/internal/app"
 	"github.com/hrthas-king/PulseBar/internal/ipinfo"
@@ -79,6 +80,12 @@ func CompactRTT(s app.Snapshot) string {
 	return strings.ReplaceAll(RTT(s), " ", "")
 }
 
+// quotePriceChangeText is shared by the taskbar and tray summary so that
+// exchange-specific price precision remains consistent between both views.
+func quotePriceChangeText(q market.Quote) string {
+	return fmt.Sprintf("%.*f %+.2f%%", market.PriceDecimals(q.Symbol), q.Price, q.ChangePercent)
+}
+
 func QuoteSummary(s app.Snapshot) string {
 	if len(s.Quotes) == 0 {
 		g := market.GroupByID(s.MarketGroup)
@@ -96,7 +103,7 @@ func QuoteSummary(s app.Snapshot) string {
 			if !v.Healthy {
 				mark = "!"
 			}
-			parts = append(parts, fmt.Sprintf("%s %.2f %+.2f%%%s", name, v.Quote.Price, v.Quote.ChangePercent, mark))
+			parts = append(parts, fmt.Sprintf("%s %s%s", name, quotePriceChangeText(*v.Quote), mark))
 		} else {
 			parts = append(parts, fmt.Sprintf("%s --", name))
 		}
@@ -117,8 +124,31 @@ func TrayTooltip(s app.Snapshot) string {
 	if s.Rates.Valid {
 		up, down = CompactSpeed(s.Rates.Up), CompactSpeed(s.Rates.Down)
 	}
-	return fmt.Sprintf("PulseBar [%s] %s\nIP: %s | HTTPS: %s\n↑%s ↓%s\n%s",
-		Country(s), StatusText(s.Status), ip, CompactRTT(s), up, down, QuoteSummary(s))
+	prefix := fmt.Sprintf("PulseBar [%s] %s\nIP: ", Country(s), StatusText(s.Status))
+	suffix := fmt.Sprintf(" | HTTPS: %s\n↑%s ↓%s\n%s", CompactRTT(s), up, down, QuoteSummary(s))
+	tip := prefix + ip + suffix
+	if len(utf16.Encode([]rune(tip))) <= 127 {
+		return tip
+	}
+	// NOTIFYICONDATAW reserves one of its 128 UTF-16 units for the terminator.
+	// Keep the market and network data intact and direct users to the diagnostic
+	// window for the complete IP when that address makes the tip too long.
+	hint := "…(见诊断)"
+	if strings.HasSuffix(ip, "*") {
+		hint = "…*(见诊断)"
+	}
+	budget := 127 - len(utf16.Encode([]rune(prefix+hint+suffix)))
+	if budget < 0 {
+		budget = 0
+	}
+	ipUnits := utf16.Encode([]rune(ip))
+	if budget < len(ipUnits) {
+		ipUnits = ipUnits[:budget]
+		if len(ipUnits) > 0 && ipUnits[len(ipUnits)-1] >= 0xd800 && ipUnits[len(ipUnits)-1] <= 0xdbff {
+			ipUnits = ipUnits[:len(ipUnits)-1]
+		}
+	}
+	return prefix + string(utf16.Decode(ipUnits)) + hint + suffix
 }
 
 // OverlayTooltip 生成任务栏悬浮条的详细悬停提示，同时包含 GeoPulse 网络状态与五态时段行情详情。
@@ -196,14 +226,15 @@ func DiagnosticsText(version string, s app.Snapshot) string {
 	for _, v := range s.Quotes {
 		fmt.Fprintf(&b, "%s\n", v.Tooltip())
 		if q := v.Quote; q != nil {
+			precision := market.PriceDecimals(q.Symbol)
 			fmt.Fprintf(&b, "  标的名称: %s (别名: %s) | 时段状态: %s %s | 数据源: %s | 模式: %s\n",
 				q.Description, v.DisplayName(), v.EffectiveState().Badge(), q.SessionText(), valueOr(q.QuoteSource, "Yahoo Finance"), q.UpdateMode)
-			fmt.Fprintf(&b, "  当前最新价: %.2f (常规盘收盘: %.2f) | 涨跌额: %+.2f | 涨跌幅: %+.3f%%\n", q.Price, q.RegularPrice, q.ChangeAbs, q.ChangePercent)
+			fmt.Fprintf(&b, "  当前最新价: %.*f (常规盘收盘: %.*f) | 涨跌额: %+.*f | 涨跌幅: %+.3f%%\n", precision, q.Price, precision, q.RegularPrice, precision, q.ChangeAbs, q.ChangePercent)
 			tradeStr := "未知"
 			if q.TradeTime > 0 {
 				tradeStr = time.Unix(q.TradeTime, 0).UTC().Format(time.RFC3339)
 			}
-			fmt.Fprintf(&b, "  参考基准价: %.2f | 最近成交(UTC): %s | HTTP耗时: %.0f ms\n", q.Previous(), tradeStr, q.RTTMs)
+			fmt.Fprintf(&b, "  参考基准价: %.*f | 最近成交(UTC): %s | HTTP耗时: %.0f ms\n", precision, q.Previous(), tradeStr, q.RTTMs)
 		}
 		fmt.Fprintf(&b, "\n")
 	}

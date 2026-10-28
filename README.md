@@ -11,13 +11,13 @@
 
 **合二为一的极轻量 Windows 任务栏网络脉搏（GeoPulse）与 VOO / QQQ 24小时全时段实时行情条（TickBar）。**
 
-当前版本：**v0.5.2（2026-10-27）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.5.2)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
+当前版本：**v0.6.0（2026-10-27）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.6.0)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
 
 双击单个 `~3.3 MiB`（amd64 本地构建）的 `.exe` 即可静默运行，同时在 **任务栏最左侧悬浮条** 与 **系统托盘** 展示：
 1. **GeoPulse 秒级网络感知**：公网出口两位国家代码、连通性状态灯（绿/黄/红）、上下行实时流量活动箭头（或一键展开实时网速与 HTTPS 请求延迟）、TUN/系统代理节点切换自动感知。
 2. **TickBar VOO / QQQ 24×5 全时段无缝实时行情**：追踪 `VOO`（标普 500 ETF）与 `QQQ`（纳斯达克 100 ETF），无缝覆盖美东时间周日 20:00 至周五 20:00 的 **夜盘（Overnight）+ 盘前（Pre-Market）+ 盘中（Regular）+ 盘后（Post-Market）** 24 小时连续实时价格流与日涨跌幅。
 
-纯 Go 标准库直接调用 Win32 GDI、Shell_NotifyIcon、IP Helper 与 WinHTTP 系统 API；无 CGo、无 Python 解释器打包、无 Electron/WebView，运行期第三方依赖为零。v0.5.2 的一次 10 秒 GUI 实测私有工作集约 **6.09 MiB**；完整资源记录及真实行情延迟的待验证范围详见 [验证记录](docs/VALIDATION.md)。
+纯 Go 标准库直接调用 Win32 GDI、Shell_NotifyIcon、IP Helper 与 WinHTTP 系统 API；无 CGo、无 Python 解释器打包、无 Electron/WebView，运行期第三方依赖为零。v0.6.0 的一次 10 秒 GUI 实测私有工作集约 **6.12 MiB**；完整资源记录及行情延迟的待验证范围详见 [验证记录](docs/VALIDATION.md)。
 
 ---
 
@@ -37,9 +37,9 @@
   - 解锁状态下按住左键可自由拖拽并记忆坐标；右键菜单支持**“锁定位置（鼠标穿透）”**与**“移到任务栏最左侧”**。
   - 支持一键切换 **绿涨红跌 / 红涨绿跌** 配色、**1s / 2s / 5s** 刷新间隔及当前用户 **开机自启**。
 
-### 2. 全球 8 大市场标的折叠切换与五态交易时段信号 (TickBar 内核)
-- **右键菜单可折叠切换 8 组主流标的对（自动持久化至 `config.json`）**：
-  - 第一行直接展示当前选中的标的对（如 `✔ 标普 / 纳指 (VOO / QQQ)`），第二行提供可折叠子菜单 **`More (更多行情标的) ▶`**，展开即可切换其余 7 组全球标的：
+### 2. 九组行情标的折叠切换与五态交易时段信号 (TickBar 内核)
+- **右键菜单可折叠切换 9 组标的对（自动持久化至 `config.json`）**：
+  - 第一行直接展示当前选中的标的对（如 `✔ 标普 / 纳指 (VOO / QQQ)`），第二行提供可折叠子菜单 **`More (更多行情标的) ▶`**，展开即可切换其余 8 组标的：
   1. `voo_qqq`（默认）：**标普 / 纳指 (`VOO` / `QQQ`)** —— 别名 `VOO`、`QQQ`
   2. `soxx_smh`：**半导体 ETF (`SOXX` / `SMH`)** —— 别名 `SOXX`、`SMH`
   3. `top2_us`：**美股市值前二 (`NVDA` / `MSFT`)** —— 别名 `NVDA`、`MSFT`
@@ -48,8 +48,10 @@
   6. `hk_indices`：**港股指数 (`^HSI` / `^HSTECH`)** —— 别名 `恒指`、`恒科`
   7. `asia_indices`：**日韩指数 (`^N225` / `^KS11`)** —— 别名 `日经`、`韩指`
   8. `eu_indices`：**欧洲指数 (`^FCHI` / `^GDAXI`)** —— 别名 `CAC40`、`DAX`
-- **A 股 / 港股 / 日韩 / 大宗商品 0 延迟秒级实时直连**：
-  - A 股、港股、日韩核心指数（日经225 / 韩国综合）及大宗商品标的直连腾讯财经行情通道（`qt.gtimg.cn`），彻底打破 Yahoo Finance 的 15~20 分钟延时限制，实现真正 0 延迟秒级 tick 刷新；
+  9. `etf_159632_159655`：**深交所场内 ETF (`159632.SZ` / `159655.SZ`)** —— 纳斯达克ETF华安 / 标普500ETF华夏，别名 `159632`、`159655`
+- **腾讯财经行情通道**：
+  - A 股、港股、日韩核心指数、欧洲指数、大宗商品及两只深交所 ETF 使用腾讯财经行情通道（`qt.gtimg.cn`）。数据更新频率和实际时效由行情源、市场交易和网络状况决定，不能仅凭轮询间隔保证零延迟。
+  - `159632` / `159655` 显示人民币场内成交价、涨跌幅及三位小数；悬停或诊断可查看行情时间（北京时间）。这两只基金按深交所时段交易，午休和休市保留最后报价；它们的场内价格与基金净值是不同数据。腾讯请求失败时不会把未确认时效的备用报价当作实时数据。
   - 黄金与布伦特原油期货支持 24 小时连续交易时段识别（周一至周五全天候连续监控）；日韩指数精准匹配东京证交所（含午休）与韩国证交所实时交易时钟。
 - **五态交易时段状态信号灯**：
   - ☀️ **早盘 / 盘前 (`PRE`)**：明黄色实心太阳符号 `☀`（`RGB(255, 214, 10)`）
@@ -74,11 +76,11 @@
 git clone https://github.com/hrthas-king/PulseBar.git
 cd PulseBar
 ./scripts/verify.ps1
-./scripts/build.ps1 -Arch amd64 -Version v0.5.2
+./scripts/build.ps1 -Arch amd64 -Version v0.6.0
 ./dist/PulseBar-windows-amd64.exe
 ```
 
-`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.5.2`。如需更新本机根目录运行副本：
+`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.6.0`。如需更新本机根目录运行副本：
 
 ```powershell
 Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
@@ -107,7 +109,7 @@ Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
 
 ```powershell
 ./scripts/generate-icons.ps1
-./scripts/package.ps1 -Version v0.5.2
+./scripts/package.ps1 -Version v0.6.0
 ```
 
 ---

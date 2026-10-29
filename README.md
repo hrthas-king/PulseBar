@@ -73,7 +73,7 @@ Samuel 原名 PulseBar，将网络感知与双标的行情显示组合在一条�
 
 可显示盘前、盘中、盘后、夜盘和休市状态；可用时段由标的与数据源决定。国内场内 ETF 按上市交易所的交易时段成交，价格显示三位小数；休市、停牌或没有新成交时，可能保留上一笔报价。
 
-**欧洲与日韩指数：**优先使用 TradingView 的 `TVC:CAC40`、`TVC:DEU40`、`TVC:NI225` 与 `KRX:KOSPI`。前三项是参考指数，菜单和行情条会显示“参考”，来源可在悬停提示中查看。[TradingView 说明](https://www.tradingview.com/support/solutions/43000709178-what-does-tvc-stand-for-in-the-instrument-ticker/)指出，TVC 数据由其计算，与交易所或其他提供商的原始指数可能不同。
+**欧洲与日韩指数：**优先使用 TradingView 的 `TVC:CAC40`、`TVC:DEU40`、`TVC:NI225` 与 `KRX:KOSPI`。前三项是参考指数，来源与性质在菜单和悬停提示中说明；行情条的百分比后不添加“参考”字样。[TradingView 说明](https://www.tradingview.com/support/solutions/43000709178-what-does-tvc-stand-for-in-the-instrument-ticker/)指出，TVC 数据由其计算，与交易所或其他提供商的原始指数可能不同。
 
 主源单侧失败时，仅该标的尝试腾讯 / Yahoo 备用源；源声明延迟或备用报价在盘中明显较旧时，行情条显示“延迟约…m”。绿色时段标记表示盘中，不代表零延迟。TradingView Scanner 未提供逐笔行情时间时，提示明确显示“源未提供逐笔时间”；程序轮询时间、日线起始时间均不会冒充成交时间。收盘后保留最后报价，不按距离收盘的时间误报延迟。
 
@@ -103,13 +103,13 @@ Samuel 原名 PulseBar，将网络感知与双标的行情显示组合在一条�
 git clone https://github.com/hrthas-king/Samuel.git
 cd Samuel
 ./scripts/verify.ps1
-./scripts/build.ps1 -Arch amd64 -Version v1.0.4
+./scripts/build.ps1 -Arch amd64 -Version v1.0.5
 ```
 
 构建脚本输出 `dist/Samuel-windows-amd64.exe`；ARM 设备可将 `-Arch amd64` 改为 `-Arch arm64`。`verify.ps1` 包含自动测试、静态检查、格式检查与双架构构建。也可以创建包含文档的发布压缩包：
 
 ```powershell
-./scripts/package.ps1 -Version v1.0.4
+./scripts/package.ps1 -Version v1.0.5
 ```
 
 常用命令（在可执行文件所在目录运行）：

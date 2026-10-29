@@ -9,18 +9,25 @@ import (
 	"github.com/hrthas-king/Samuel/internal/market"
 )
 
-func TestIndexSourceLabelsReachTaskbarTrayAndDiagnostics(t *testing.T) {
+func TestIndexSourceStaysInTooltipWhileBarOnlyShowsDelay(t *testing.T) {
 	q := market.Quote{Symbol: "^FCHI", Price: 7986.68, ChangePercent: 1.26, ChangeAbs: 99.71, State: market.StateRegular,
 		Reference: true, ProviderSymbol: "TVC:CAC40", QuoteSource: "TradingView 参考指数 (TVC:CAC40)", UpdateMode: "streaming"}
-	for _, tag := range []string{"参考", "参考·延迟约15m"} {
-		if strings.Contains(tag, "延迟") {
-			q.DelaySeconds = 900
-		}
+	for _, delay := range []int{0, 900} {
+		q.DelaySeconds = delay
 		s := app.Snapshot{MarketGroup: market.GroupEUIndices, Quotes: []market.View{{Symbol: q.Symbol, Quote: &q, Healthy: true}}}
-		for _, text := range []string{quotePriceChangeText(q), QuoteSummary(s), TrayTooltip(s), DiagnosticsText("test", s)} {
-			if !strings.Contains(text, tag) {
-				t.Errorf("provenance label %s missing: %s", tag, text)
+		for _, text := range []string{quotePriceChangeText(q), QuoteSummary(s), TrayTooltip(s)} {
+			if strings.Contains(text, "参考") {
+				t.Errorf("reference label still follows the compact quote: %s", text)
 			}
+			if strings.Contains(text, "延迟约15m") != (delay > 0) {
+				t.Errorf("delay label was lost or invented: %s", text)
+			}
+		}
+		if text := DiagnosticsText("test", s); !strings.Contains(text, "参考") || !strings.Contains(text, "TVC:CAC40") {
+			t.Errorf("source disclosure lost from diagnostics: %s", text)
+		}
+		if !q.Reference {
+			t.Fatal("formatting changed the quote's reference metadata")
 		}
 	}
 	q.Reference, q.DelaySeconds, q.ProviderSymbol = false, 0, ""

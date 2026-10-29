@@ -84,6 +84,9 @@ func CompactRTT(s app.Snapshot) string {
 // exchange-specific price precision remains consistent between both views.
 func quotePriceChangeText(q market.Quote) string {
 	text := fmt.Sprintf("%.*f %+.2f%%", market.PriceDecimals(q.Symbol), q.Price, q.ChangePercent)
+	// This value copy only changes compact presentation; source provenance
+	// remains available in the menu, full tooltip and diagnostics.
+	q.Reference = false
 	if tag := q.FeedTag(time.Now()); tag != "" {
 		text += " [" + tag + "]"
 	}

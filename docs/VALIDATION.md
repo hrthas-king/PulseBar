@@ -1,6 +1,24 @@
 # 验证记录 (Validation)
 
-## v1.0.1：新版霓虹应用图标（最新）
+## v1.0.2：TUN 环境上下行流量统计修复（最新）
+
+验证日期：**2026-10-29 美东时间**。
+
+- 使用约 1.19 MB 的项目公开文件进行受控下载，旧版选中的 Nano 接口增加发送 **1,286,469 字节**、接收 **1,286,563 字节**；同期 WLAN 增加发送 **109,418 字节**、接收 **1,352,778 字节**，复现了虚拟接口的近似对称计数。原生读取值与独立 Windows/.NET 累计计数一致，排除结构错位或取错收发字段。
+- 修复后选中 WLAN，累计计数均落在独立系统统计的前后快照范围内。同一文件再次下载时，Samuel 记录发送 **162,136 字节**、接收 **1,379,682 字节**；同期 Nano 仍报近似对称值。不同快照之间有采样时间差与后台流量，不要求逐字节相等。
+- TUN / VPN 路由下按可用非隧道默认路由的综合 metric 选择一个统计接口，同等优先级优先硬件接口；普通直连继续使用系统选中的路由接口，不叠加多接口计数。依据 [GetIpForwardTable 文档](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getipforwardtable)读取路由优先级，依据 [MIB_IF_ROW2 文档](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_if_row2)区分接口及收发字节。
+- 自动测试 **68 项**（含子项共 **105 项**）、静态检查、格式检查、Windows amd64 / arm64 构建通过；覆盖隧道识别、直连保持、路由排序、断开/过滤/回环接口排除、无可用底层接口及 ABI 布局。两个联网/交互测试默认跳过，ARM64 尚未真机运行。
+- 10 秒完整 GUI 冒烟通过：统计网卡为 WLAN，状态在线，采样得到上行约 **16.2 KiB/s**、下行约 **29.3 KiB/s**。GUI 私有工作集 **6,848,512 字节（约 6.53 MiB）**，GDI / USER 对象数 **15 / 10**。
+- 本机已更新至 v1.0.2，实际用户配置内容与更新前一致；用户实际查看，已确认上下行正常区分。临时调查与流量回放脚本位于忽略目录 `.artifacts/rate-debug/`，未加入程序运行依赖。
+
+本轮本机产物 SHA-256（GitHub Actions 工具链不同，可能产生不同哈希）：
+
+```text
+DB5ACFC1D4E7A91C30F91AD196EEA54E4CF8CC115B63282F1C6042A4F8265004  Samuel.exe / dist/Samuel-windows-amd64.exe
+33B65F60BE8138EE45516BA745AF7B851A27F3D002AC48366983DA8BC5D7C252  dist/Samuel-windows-arm64.exe
+```
+
+## v1.0.1：新版霓虹应用图标（历史）
 
 验证日期：**2026-10-29 美东时间**。
 

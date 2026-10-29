@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart LR
-    NIC["GetBestInterface + GetIfEntry2\n每秒读取 64 位出口计数"] --> Samples["采样通道"]
+    NIC["出口路由 + GetIfEntry2\nTUN 时选择底层默认路由\n每秒读取单一接口计数"] --> Samples["采样通道"]
     ICMP["IcmpSendEcho\n32 字节 payload / 每秒一包"] --> Probes["探针通道"]
     HTTPS["独立 WinHTTP HTTPS GET\n每 5 秒采样 / 新连接"] --> Latency["延迟结果 + 出口代次"]
     Events["NotifyIpInterfaceChange\nNotifyUnicastIpAddressChange\nNotifyRouteChange2"] --> Debounce["事件信号 / 去抖 / 网络代次"]
@@ -33,7 +33,8 @@ flowchart LR
    - 锁定时启用 `WS_EX_TRANSPARENT` 鼠标穿透；解锁时支持左键拖拽位置与 `tooltips_class32` 原生悬停提示。
    - 不在 UI 线程执行任何 ICMP、WinHTTP、注册表或磁盘写入。
 2. **固定 1 秒网络心跳与网卡采样 (`internal/network` + `internal/monitor`)**：
-   - `GetBestInterface` + `GetIfEntry2` 仅统计当前路由出口网卡的 64 位累计字节，避免物理网卡与 VPN 虚拟接口重复计数。
+   - `GetBestInterface` + `GetIfEntry2` 查找当前路由接口；TUN / VPN 接口会通过 `GetIpForwardTable` 的默认路由及其综合 metric 选择一个可用的非隧道底层接口，同等优先级优先硬件接口。不相加多个接口，不采用断开、过滤或回环接口。
+   - 用选中接口的 64 位收发字节和实际采样间隔计算速率，LUID / 索引切换或计数回退时重新建立基线。连通性探针单独检查原始路由，统计接口不可用不直接导致连通性探针本地错误。
    - 每秒对 `1.1.1.1` / `8.8.8.8` 发起 ICMP 心跳；主目标失败时同周期复核备用目标，必要时通过 TCP 443 和最近 HTTPS 通信/流量作连通性旁证。
    - 已在线时单次失败保持绿色；连续 2～3 次失败进入 `Degraded`，连续 4 次失败进入 `Offline`，一次成功恢复 `Online`。旁证只参与连通判断，不生成或沿用延迟数值。
 3. **独立 HTTPS 延迟 (`internal/network/latency_windows.go`)**：

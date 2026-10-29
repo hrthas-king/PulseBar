@@ -68,24 +68,40 @@ func ipv4(target string) (uint32, error) {
 	return binary.LittleEndian.Uint32(a[:]), nil
 }
 
-// ReadCounters 只读取当前路由出口接口的 64 位总字节计数，避免 VPN 与物理网卡重复累加。
-func ReadCounters(target string) (monitor.Counters, error) {
+func routedInterface(target string) (ifRow2, error) {
 	ip, err := ipv4(target)
 	if err != nil {
-		return monitor.Counters{}, err
+		return ifRow2{}, err
 	}
 	var index uint32
 	code, _, _ := getBestInterface.Call(uintptr(ip), uintptr(unsafe.Pointer(&index)))
 	if code != 0 {
-		return monitor.Counters{}, fmt.Errorf("找不到 IPv4 出口路由: %w", syscall.Errno(code))
+		return ifRow2{}, fmt.Errorf("找不到 IPv4 出口路由: %w", syscall.Errno(code))
 	}
+	return readInterface(index)
+}
+
+func readInterface(index uint32) (ifRow2, error) {
 	row := ifRow2{Index: index}
-	code, _, _ = getIfEntry2.Call(uintptr(unsafe.Pointer(&row)))
+	code, _, _ := getIfEntry2.Call(uintptr(unsafe.Pointer(&row)))
 	if code != 0 {
-		return monitor.Counters{}, fmt.Errorf("读取网卡计数: %w", syscall.Errno(code))
+		return ifRow2{}, fmt.Errorf("读取网卡计数: %w", syscall.Errno(code))
 	}
 	if row.OperStatus != 1 {
-		return monitor.Counters{}, fmt.Errorf("出口网卡未连接")
+		return ifRow2{}, fmt.Errorf("出口网卡未连接")
+	}
+	return row, nil
+}
+
+// ReadCounters samples one real uplink, bypassing mirrored TUN statistics.
+func ReadCounters(target string) (monitor.Counters, error) {
+	routed, err := routedInterface(target)
+	if err != nil {
+		return monitor.Counters{}, err
+	}
+	row, err := trafficInterface(routed)
+	if err != nil {
+		return monitor.Counters{}, err
 	}
 	return monitor.Counters{
 		LUID:     row.LUID,
@@ -122,7 +138,7 @@ func (p *Pinger) Close() {
 
 func (p *Pinger) Ping(target string) monitor.Probe {
 	defer func() { runtime.KeepAlive(p) }()
-	if _, err := ReadCounters(target); err != nil {
+	if _, err := routedInterface(target); err != nil {
 		return monitor.Probe{
 			Target: target,
 			Uplink: monitor.UplinkLocalError,

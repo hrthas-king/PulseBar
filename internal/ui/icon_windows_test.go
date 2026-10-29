@@ -14,18 +14,30 @@ import (
 )
 
 func TestNativeTrayIconIsUpright(t *testing.T) {
-	u := NewUI("dev", config.Default())
+	cfg := config.Default()
+	cfg.TrayIcon = config.TrayIconNetwork
+	u := NewUI("dev", cfg)
 	u.instance, _, _ = getModule.Call(0)
 	snapshot := app.Snapshot{Status: monitor.Online, Geo: ipinfo.Info{Country: "TH"}}
 	_ = u.update(snapshot)
 	if u.data.Icon == 0 {
 		t.Fatal("native icon was not created")
 	}
-	defer func() {
-		for _, icon := range u.icons {
-			destroyIcon.Call(icon)
+	defer u.releaseTrayIcons()
+	pixels := nativeIconPixels(t, u.data.Icon)
+	want := Pixels("TH", monitor.Online, false, false, true)
+	for y := 4; y < 18; y++ {
+		for x := 5; x < 27; x++ {
+			i := (y*32 + x) * 4
+			if pixels[i] != want[i+2] || pixels[i+1] != want[i+1] || pixels[i+2] != want[i] {
+				t.Fatalf("country letters vertically inverted at (%d,%d)", x, y)
+			}
 		}
-	}()
+	}
+}
+
+func nativeIconPixels(t *testing.T, icon uintptr) [4096]byte {
+	t.Helper()
 	var info struct {
 		Icon               uint32
 		HotspotX, HotspotY uint32
@@ -33,7 +45,7 @@ func TestNativeTrayIconIsUpright(t *testing.T) {
 		Mask, Color        uintptr
 	}
 	getIconInfo := user32.NewProc("GetIconInfo")
-	if ok, _, err := getIconInfo.Call(u.data.Icon, uintptr(unsafe.Pointer(&info))); ok == 0 {
+	if ok, _, err := getIconInfo.Call(icon, uintptr(unsafe.Pointer(&info))); ok == 0 {
 		t.Fatal(err)
 	}
 	gdi := winapi.DLL("gdi32.dll")
@@ -64,13 +76,5 @@ func TestNativeTrayIconIsUpright(t *testing.T) {
 	if rows != 32 {
 		t.Fatalf("GetDIBits rows=%d err=%v", rows, err)
 	}
-	want := Pixels("TH", monitor.Online, false, false, true)
-	for y := 4; y < 18; y++ {
-		for x := 5; x < 27; x++ {
-			i := (y*32 + x) * 4
-			if pixels[i] != want[i+2] || pixels[i+1] != want[i+1] || pixels[i+2] != want[i] {
-				t.Fatalf("country letters vertically inverted at (%d,%d)", x, y)
-			}
-		}
-	}
+	return pixels
 }

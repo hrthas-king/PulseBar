@@ -126,13 +126,15 @@ func parseIndexQuote(symbol string, values []json.RawMessage, rtt float64, now t
 	if err != nil {
 		return Quote{}, err
 	}
-	if session != "market" && session != "out_of_session" {
+	if session != "market" && session != "out_of_session" && session != "pre_market" && session != "post_market" {
 		return Quote{}, fmt.Errorf("无法确认指数交易时段: %s", session)
 	}
 	state, sessionText := resolveIndexSession(symbol, now, 0)
 	if session == "market" {
 		state, sessionText = StateRegular, "盘中 (Regular)"
-	} else if session == "out_of_session" {
+	} else if session == "pre_market" {
+		state, sessionText = StatePreMarket, "盘前 (Pre-Market)"
+	} else if session == "out_of_session" || session == "post_market" {
 		state, sessionText = StateClosed, "休市 (Closed)"
 	}
 	marketState := "REGULAR"

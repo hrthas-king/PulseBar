@@ -56,7 +56,7 @@ func TestFluentMenuPreservesActionsAndSideDelete(t *testing.T) {
 		}
 	}
 	walk(entries)
-	for _, action := range []Action{ActionRefresh, ActionToggleNetDetail, ActionToggleLock, ActionDockLeft, ActionToggleColor, ActionGroupVOOQQQ, ActionGroupETF159632159655, ActionScale75, ActionScale130, ActionInterval1, ActionInterval5, ActionDiagnostics, ActionAutostart, ActionExit, actionAddCustom} {
+	for _, action := range []Action{ActionRefresh, ActionToggleNetDetail, ActionTrayIconApplication, ActionTrayIconNetwork, ActionToggleLock, ActionDockLeft, ActionToggleColor, ActionGroupVOOQQQ, ActionGroupETF159632159655, ActionScale75, ActionScale130, ActionInterval1, ActionInterval5, ActionDiagnostics, ActionAutostart, ActionExit, actionAddCustom} {
 		if !found[action] {
 			t.Errorf("menu lost action %d", action)
 		}
@@ -223,7 +223,7 @@ func TestFluentNativeLightDarkRenderingAndInputFocus(t *testing.T) {
 	defer runtime.UnlockOSThread()
 	cfg := config.Default()
 	cfg.UIScalePercent = 75
-	u := NewUI("v1.0.0", cfg)
+	u := NewUI("v1.0.6", cfg)
 	u.openCustomPanel(false)
 	defer u.closeCustomPanel()
 	p := u.customPanel

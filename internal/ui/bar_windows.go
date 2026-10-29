@@ -49,6 +49,8 @@ const (
 	ActionDiagnostics
 	ActionAutostart
 	ActionExit
+	ActionTrayIconApplication
+	ActionTrayIconNetwork
 )
 
 func GroupForAction(act Action) (string, bool) {
@@ -132,6 +134,7 @@ var (
 	fillRect             = user32.NewProc("FillRect")
 	drawText             = user32.NewProc("DrawTextW")
 	loadCursor           = user32.NewProc("LoadCursorW")
+	loadImage            = user32.NewProc("LoadImageW")
 	createIcon           = user32.NewProc("CreateIcon")
 	destroyIcon          = user32.NewProc("DestroyIcon")
 	createMenu           = user32.NewProc("CreatePopupMenu")
@@ -251,6 +254,7 @@ type UI struct {
 	font           uintptr
 	data           notifyIcon
 	icons          map[string]uintptr
+	appIcon        uintptr
 	iconCountry    string
 	trayAdded      bool
 	taskbarMessage uint32
@@ -279,6 +283,9 @@ type UI struct {
 func NewUI(version string, cfg config.Config) *UI {
 	if !config.ValidUIScalePercent(cfg.UIScalePercent) {
 		cfg.UIScalePercent = config.DefaultUIScalePercent
+	}
+	if !config.ValidTrayIcon(cfg.TrayIcon) {
+		cfg.TrayIcon = config.TrayIconApplication
 	}
 	u := &UI{
 		version:       version,
@@ -459,39 +466,26 @@ func (u *UI) hideTooltip() {
 }
 
 func (u *UI) update(s app.Snapshot) error {
-	country := Country(s)
-	if u.iconCountry != country {
-		old := u.icons
-		u.icons = make(map[string]uintptr)
-		u.iconCountry = country
-		defer func() {
-			for _, h := range old {
-				destroyIcon.Call(h)
-			}
-		}()
-	}
-	key := IconKey(s)
-	icon := u.icons[key]
-	if icon == 0 {
-		pixels := Pixels(country, s.Status, s.Rates.Up > 0, s.Rates.Down > 0, s.At.Unix()%2 == 0)
-		var xor [4096]byte
-		var and [128]byte
-		for y := 0; y < 32; y++ {
-			for x := 0; x < 32; x++ {
-				src := (y*32 + x) * 4
-				dst := (y*32 + x) * 4
-				xor[dst], xor[dst+1], xor[dst+2], xor[dst+3] = pixels[src+2], pixels[src+1], pixels[src], pixels[src+3]
-				if pixels[src+3] == 0 {
-					and[y*4+x/8] |= 1 << uint(7-x%8)
+	var icon uintptr
+	var err error
+	if u.cfg.TrayIcon == config.TrayIconApplication {
+		icon, err = u.applicationTrayIcon()
+	} else {
+		country := Country(s)
+		if u.iconCountry != country {
+			old := u.icons
+			u.icons = make(map[string]uintptr)
+			u.iconCountry = country
+			defer func() {
+				for _, h := range old {
+					destroyIcon.Call(h)
 				}
-			}
+			}()
 		}
-		var err error
-		icon, _, err = createIcon.Call(u.instance, 32, 32, 1, 32, uintptr(unsafe.Pointer(&and[0])), uintptr(unsafe.Pointer(&xor[0])))
-		if icon == 0 {
-			return winapi.Error("CreateIcon", err)
-		}
-		u.icons[key] = icon
+		icon, err = u.networkTrayIcon(s)
+	}
+	if err != nil {
+		return err
 	}
 	u.data.Icon = icon
 	copyText(u.data.Tip[:], TrayTooltip(s))
@@ -507,6 +501,78 @@ func (u *UI) update(s app.Snapshot) error {
 	}
 	if u.tooltipVisible {
 		u.showTooltip()
+	}
+	return nil
+}
+
+func (u *UI) applicationTrayIcon() (uintptr, error) {
+	if u.appIcon == 0 {
+		name := winapi.UTF16("APP")
+		icon, _, err := loadImage.Call(u.instance, uintptr(unsafe.Pointer(name)), 1, 32, 32, 0)
+		runtime.KeepAlive(name)
+		if icon == 0 {
+			return 0, winapi.Error("LoadImageW(APP)", err)
+		}
+		u.appIcon = icon
+	}
+	return u.appIcon, nil
+}
+
+func (u *UI) networkTrayIcon(s app.Snapshot) (uintptr, error) {
+	key := IconKey(s)
+	icon := u.icons[key]
+	if icon == 0 {
+		pixels := Pixels(Country(s), s.Status, s.Rates.Up > 0, s.Rates.Down > 0, s.At.Unix()%2 == 0)
+		var xor [4096]byte
+		var and [128]byte
+		for y := 0; y < 32; y++ {
+			for x := 0; x < 32; x++ {
+				src := (y*32 + x) * 4
+				dst := (y*32 + x) * 4
+				xor[dst], xor[dst+1], xor[dst+2], xor[dst+3] = pixels[src+2], pixels[src+1], pixels[src], pixels[src+3]
+				if pixels[src+3] == 0 {
+					and[y*4+x/8] |= 1 << uint(7-x%8)
+				}
+			}
+		}
+		var err error
+		icon, _, err = createIcon.Call(u.instance, 32, 32, 1, 32, uintptr(unsafe.Pointer(&and[0])), uintptr(unsafe.Pointer(&xor[0])))
+		if icon == 0 {
+			return 0, winapi.Error("CreateIcon", err)
+		}
+		u.icons[key] = icon
+	}
+	return icon, nil
+}
+
+func (u *UI) releaseTrayIcons() {
+	for _, icon := range u.icons {
+		destroyIcon.Call(icon)
+	}
+	u.icons = make(map[string]uintptr)
+	if u.appIcon != 0 {
+		destroyIcon.Call(u.appIcon)
+		u.appIcon = 0
+	}
+}
+
+func (u *UI) setTrayIcon(style string) error {
+	if !config.ValidTrayIcon(style) {
+		return fmt.Errorf("无效的托盘图标样式: %s", style)
+	}
+	next := u.cfg
+	next.TrayIcon = style
+	if style == config.TrayIconApplication && u.latest.Load() != nil {
+		if _, err := u.applicationTrayIcon(); err != nil {
+			return err
+		}
+	}
+	if err := u.saveSettings(next); err != nil {
+		return fmt.Errorf("保存托盘图标设置失败: %w", err)
+	}
+	u.cfg = next
+	if snapshot := u.latest.Load(); snapshot != nil {
+		return u.update(*snapshot)
 	}
 	return nil
 }
@@ -797,6 +863,30 @@ func (u *UI) buildMenu() (uintptr, map[Action]customMenuCommand) {
 	}
 	add(ActionToggleNetDetail, "任务栏显示实时网速与延迟", detailFlags)
 
+	iconMenu, _, _ := createMenu.Call()
+	if iconMenu != 0 {
+		styleName := "应用图标"
+		for _, option := range []struct {
+			action       Action
+			style, label string
+		}{
+			{ActionTrayIconApplication, config.TrayIconApplication, "Samuel 应用图标"},
+			{ActionTrayIconNetwork, config.TrayIconNetwork, "网络状态图标（地区 / 上下行）"},
+		} {
+			flags := uintptr(0)
+			if u.cfg.TrayIcon == option.style {
+				flags = 8
+				if option.style == config.TrayIconNetwork {
+					styleName = "网络状态"
+				}
+			}
+			label := winapi.UTF16(option.label)
+			appendMenu.Call(iconMenu, flags, uintptr(option.action), uintptr(unsafe.Pointer(label)))
+		}
+		title := winapi.UTF16("托盘图标（当前：" + styleName + "）")
+		appendMenu.Call(menu, 0x10, iconMenu, uintptr(unsafe.Pointer(title)))
+	}
+
 	lockFlags := uintptr(0)
 	if u.cfg.Locked {
 		lockFlags = 8
@@ -946,6 +1036,14 @@ func (u *UI) handleMenuSelection(cmd uintptr, customCommands map[Action]customMe
 
 func (u *UI) handleAction(act Action) {
 	switch act {
+	case ActionTrayIconApplication, ActionTrayIconNetwork:
+		style := config.TrayIconApplication
+		if act == ActionTrayIconNetwork {
+			style = config.TrayIconNetwork
+		}
+		if err := u.setTrayIcon(style); err != nil {
+			ShowError(err)
+		}
 	case ActionToggleNetDetail:
 		u.cfg.ShowNetDetail = !u.cfg.ShowNetDetail
 		u.updateDimensions()
@@ -1228,9 +1326,7 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	}
 	defer func() {
 		u.callNotify(2)
-		for _, icon := range u.icons {
-			destroyIcon.Call(icon)
-		}
+		u.releaseTrayIcons()
 	}()
 
 	if err := u.update(app.Snapshot{Status: monitor.Unknown}); err != nil {

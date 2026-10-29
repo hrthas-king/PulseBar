@@ -24,6 +24,7 @@ func TestVisibleAddFromMenuRemainsOpen(t *testing.T) {
 	defer cancel()
 	cfg := config.Default()
 	cfg.Locked = true
+	cfg.TrayIcon = config.TrayIconNetwork // This test executable has no application icon resource.
 	u := NewUI("activation-test", cfg)
 	var panelExists, visible, foreground bool
 	isVisible := user32.NewProc("IsWindowVisible")

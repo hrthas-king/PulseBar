@@ -13,6 +13,8 @@ import (
 const (
 	DefaultMarketGroup    = "voo_qqq"
 	DefaultUIScalePercent = 100
+	TrayIconApplication   = "application"
+	TrayIconNetwork       = "network"
 )
 
 var UIScalePresets = []int{75, 85, 90, 100, 115, 130}
@@ -38,6 +40,7 @@ type Config struct {
 	MarketGroup     string           `json:"market_group"`
 	UIScalePercent  int              `json:"ui_scale_percent"`
 	Placement       string           `json:"placement"`
+	TrayIcon        string           `json:"tray_icon"`
 	X               *int             `json:"x,omitempty"`
 	Y               *int             `json:"y,omitempty"`
 }
@@ -48,6 +51,10 @@ func ValidInterval(seconds int) bool {
 
 func ValidMarketGroup(group string) bool {
 	return validMarketGroups[group]
+}
+
+func ValidTrayIcon(style string) bool {
+	return style == TrayIconApplication || style == TrayIconNetwork
 }
 
 func ValidUIScalePercent(pct int) bool {
@@ -68,6 +75,7 @@ func Default() Config {
 		MarketGroup:     DefaultMarketGroup,
 		UIScalePercent:  DefaultUIScalePercent,
 		Placement:       "left",
+		TrayIcon:        TrayIconApplication,
 	}
 }
 
@@ -120,6 +128,9 @@ func LoadFrom(path string) Config {
 	c.ShowNetDetail = saved.ShowNetDetail
 	c.Locked = saved.Locked
 	c.UpIsRed = saved.UpIsRed
+	if ValidTrayIcon(saved.TrayIcon) {
+		c.TrayIcon = saved.TrayIcon
+	}
 	if saved.Placement == "manual" && saved.X != nil && saved.Y != nil &&
 		abs(*saved.X) < 100000 && abs(*saved.Y) < 100000 {
 		x, y := *saved.X, *saved.Y
@@ -141,6 +152,11 @@ func Save(c Config) error {
 func SaveTo(path string, c Config) error {
 	if !ValidInterval(c.IntervalSeconds) {
 		return fmt.Errorf("刷新间隔只能为 1、2、5 秒")
+	}
+	if c.TrayIcon == "" {
+		c.TrayIcon = TrayIconApplication
+	} else if !ValidTrayIcon(c.TrayIcon) {
+		return fmt.Errorf("无效的托盘图标样式: %s", c.TrayIcon)
 	}
 	if c.MarketGroup == "" {
 		c.MarketGroup = DefaultMarketGroup

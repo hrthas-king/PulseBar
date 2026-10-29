@@ -150,3 +150,23 @@ func TestIndexRequestUsesOnlyRequestedReferenceSymbols(t *testing.T) {
 		t.Fatal("unrelated instrument accepted as index")
 	}
 }
+
+func TestIndexProviderPreAndPostSessionsRemainValid(t *testing.T) {
+	for _, tc := range []struct {
+		session string
+		state   SessionState
+	}{
+		{"market", StateRegular},
+		{"pre_market", StatePreMarket},
+		{"post_market", StateClosed},
+		{"out_of_session", StateClosed},
+	} {
+		t.Run(tc.session, func(t *testing.T) {
+			body := strings.Replace(referenceIndexFixture, `"market"`, `"`+tc.session+`"`, 1)
+			batch, err := parseIndexQuotes([]string{"^FCHI"}, []byte(body), 20, time.Now())
+			if err != nil || batch["^FCHI"].Quote == nil || batch["^FCHI"].Quote.State != tc.state {
+				t.Fatalf("valid provider session rejected or misclassified: %s %v %#v", tc.session, err, batch)
+			}
+		})
+	}
+}

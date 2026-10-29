@@ -440,6 +440,9 @@ func fluentIcon(e fluentEntry) string {
 	if strings.HasPrefix(e.label, "显示大小") {
 		return "\ue8a7"
 	}
+	if strings.HasPrefix(e.label, "托盘图标") {
+		return "\ue91b"
+	}
 	if strings.Contains(e.label, "间隔") {
 		return "\ue823"
 	}

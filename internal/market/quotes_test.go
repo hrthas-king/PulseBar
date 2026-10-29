@@ -268,8 +268,9 @@ func TestTencentQueryForSymbols(t *testing.T) {
 }
 
 func TestParseTencentQuoteBatch_AsiaIndices(t *testing.T) {
-	raw := []byte("v_gzN225=\"N225~日经225指数~2026-10-27 14:25:26~63254.28~1064.63~1.71~AP~\";\r\n" +
-		"v_gzKS11=\"KS11~韩国首尔综合~2026-10-27 14:20:00~5626.49~157.02~2.87~AP~\";\r\n")
+	// Provider timestamps are Beijing time and must precede the first sample.
+	raw := []byte("v_gzN225=\"N225~日经225指数~2026-10-27 08:45:26~63254.28~1064.63~1.71~AP~\";\r\n" +
+		"v_gzKS11=\"KS11~韩国首尔综合~2026-10-27 08:40:00~5626.49~157.02~2.87~AP~\";\r\n")
 	syms := []string{"^N225", "^KS11"}
 
 	// Tuesday 10:00 JST/KST (01:00 UTC) -> Regular trading for both

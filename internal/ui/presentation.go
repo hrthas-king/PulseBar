@@ -83,7 +83,11 @@ func CompactRTT(s app.Snapshot) string {
 // quotePriceChangeText is shared by the taskbar and tray summary so that
 // exchange-specific price precision remains consistent between both views.
 func quotePriceChangeText(q market.Quote) string {
-	return fmt.Sprintf("%.*f %+.2f%%", market.PriceDecimals(q.Symbol), q.Price, q.ChangePercent)
+	text := fmt.Sprintf("%.*f %+.2f%%", market.PriceDecimals(q.Symbol), q.Price, q.ChangePercent)
+	if tag := q.FeedTag(time.Now()); tag != "" {
+		text += " [" + tag + "]"
+	}
+	return text
 }
 
 func QuoteSummary(s app.Snapshot) string {

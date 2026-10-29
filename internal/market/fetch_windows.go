@@ -106,7 +106,7 @@ func refreshCrumbLocked(ctx context.Context, session uintptr) (string, error) {
 	return "", lastErr
 }
 
-// Fetch 通过 WinHTTP 获取当前激活标的分组的实时行情。
+// Fetch 通过 WinHTTP 获取当前激活标的分组的行情。
 func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -122,6 +122,38 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 }
 
 func fetchSymbolsLocked(ctx context.Context, syms []string) (map[string]SymbolResult, error) {
+	indices := len(syms) > 0
+	for _, symbol := range syms {
+		indices = indices && isGlobalIndex(symbol)
+	}
+	if indices {
+		return fetchIndexQuotes(ctx, syms, fetchTradingViewIndicesLocked, fetchStandardSymbolsLocked)
+	}
+	return fetchStandardSymbolsLocked(ctx, syms)
+}
+
+func fetchTradingViewIndicesLocked(ctx context.Context, syms []string) (map[string]SymbolResult, error) {
+	session, err := ensureSessionLocked()
+	if err != nil {
+		return nil, err
+	}
+	requestBody, err := indexRequest(syms)
+	if err != nil {
+		return nil, err
+	}
+	start := time.Now()
+	status, body, err := doHTTPRequest(ctx, session, TradingViewHost, "/global/scan", false, "POST", requestBody)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, HTTPError{StatusCode: status}
+	}
+	rtt := float64(time.Since(start).Microseconds()) / 1000
+	return parseIndexQuotes(syms, body, rtt, time.Now())
+}
+
+func fetchStandardSymbolsLocked(ctx context.Context, syms []string) (map[string]SymbolResult, error) {
 	session, err := ensureSessionLocked()
 	if err != nil {
 		return nil, err
@@ -304,6 +336,11 @@ func fetchChartSymbol(ctx context.Context, session uintptr, sym string) (Quote, 
 }
 
 func doHTTPGet(ctx context.Context, session uintptr, host, path string, enableCookies bool) (int, []byte, error) {
+	return doHTTPRequest(ctx, session, host, path, enableCookies, "GET", nil)
+}
+
+func doHTTPRequest(ctx context.Context, session uintptr, host, path string, enableCookies bool, method string, requestBody []byte) (int, []byte, error) {
+	defer runtime.KeepAlive(requestBody)
 	hostPtr := winapi.UTF16(host)
 	conn, _, err := connect.Call(session, uintptr(unsafe.Pointer(hostPtr)), 443, 0)
 	runtime.KeepAlive(hostPtr)
@@ -312,7 +349,7 @@ func doHTTPGet(ctx context.Context, session uintptr, host, path string, enableCo
 	}
 	defer closeHandle.Call(conn)
 
-	verb := winapi.UTF16("GET")
+	verb := winapi.UTF16(method)
 	pathPtr := winapi.UTF16(path)
 	request, _, err := openRequest.Call(conn, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(pathPtr)), 0, 0, 0, 0x00800000)
 	if request == 0 {
@@ -329,9 +366,16 @@ func doHTTPGet(ctx context.Context, session uintptr, host, path string, enableCo
 	if err := ctx.Err(); err != nil {
 		return 0, nil, err
 	}
-	hdrPtr := winapi.UTF16(requestHeaders)
-	if ok, _, err := sendRequest.Call(request, uintptr(unsafe.Pointer(hdrPtr)), ^uintptr(0), 0, 0, 0, 0); ok == 0 {
-		return 0, nil, winapi.Error("WinHttpSendRequest", err)
+	headers := requestHeaders
+	var payload uintptr
+	if len(requestBody) > 0 {
+		headers += "Content-Type: application/json\r\n"
+		payload = uintptr(unsafe.Pointer(&requestBody[0]))
+	}
+	hdrPtr := winapi.UTF16(headers)
+	ok, _, sendErr := sendRequest.Call(request, uintptr(unsafe.Pointer(hdrPtr)), ^uintptr(0), payload, uintptr(len(requestBody)), uintptr(len(requestBody)), 0)
+	if ok == 0 {
+		return 0, nil, winapi.Error("WinHttpSendRequest", sendErr)
 	}
 	if err := ctx.Err(); err != nil {
 		return 0, nil, err

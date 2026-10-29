@@ -75,8 +75,8 @@ var Groups = []GroupSpec{
 	{ID: GroupGoldOil, MenuLabel: "黄金 / 布伦特原油 (GC / BZ)", Symbols: []string{"GC=F", "BZ=F"}},
 	{ID: GroupCNIndices, MenuLabel: "A股指数 (上证 / 创指)", Symbols: []string{"000001.SS", "399006.SZ"}},
 	{ID: GroupHKIndices, MenuLabel: "港股指数 (恒指 / 恒科)", Symbols: []string{"^HSI", "^HSTECH"}},
-	{ID: GroupAsiaIndices, MenuLabel: "日韩指数 (日经225 / 韩国综合)", Symbols: []string{"^N225", "^KS11"}},
-	{ID: GroupEUIndices, MenuLabel: "欧洲指数 (法国CAC / 德国DAX)", Symbols: []string{"^FCHI", "^GDAXI"}},
+	{ID: GroupAsiaIndices, MenuLabel: "日韩指数 (TradingView · 日经参考 / 韩国综合)", Symbols: []string{"^N225", "^KS11"}},
+	{ID: GroupEUIndices, MenuLabel: "欧洲参考指数 (TradingView · CAC / DAX)", Symbols: []string{"^FCHI", "^GDAXI"}},
 	{ID: GroupETF159632159655, MenuLabel: "华安纳指ETF / 华夏标普500ETF", Symbols: []string{"159632.SZ", "159655.SZ"}},
 }
 
@@ -225,22 +225,25 @@ func (e HTTPError) Error() string {
 }
 
 type Quote struct {
-	Symbol        string       `json:"symbol"`
-	Alias         string       `json:"alias"`
-	Price         float64      `json:"price"`
-	ChangePercent float64      `json:"change_percent"`
-	ChangeAbs     float64      `json:"change_abs"`
-	RegularPrice  float64      `json:"regular_price"`
-	Currency      string       `json:"currency,omitempty"`
-	QuoteType     string       `json:"quote_type,omitempty"`
-	MarketState   string       `json:"market_state,omitempty"`
-	State         SessionState `json:"session_state"`
-	TradeTime     int64        `json:"trade_time,omitempty"`
-	QuoteSource   string       `json:"quote_source,omitempty"`
-	UpdateMode    string       `json:"update_mode"`
-	Session       string       `json:"session"`
-	Description   string       `json:"description"`
-	RTTMs         float64      `json:"rtt_ms"`
+	Symbol         string       `json:"symbol"`
+	Alias          string       `json:"alias"`
+	Price          float64      `json:"price"`
+	ChangePercent  float64      `json:"change_percent"`
+	ChangeAbs      float64      `json:"change_abs"`
+	RegularPrice   float64      `json:"regular_price"`
+	Currency       string       `json:"currency,omitempty"`
+	QuoteType      string       `json:"quote_type,omitempty"`
+	MarketState    string       `json:"market_state,omitempty"`
+	State          SessionState `json:"session_state"`
+	TradeTime      int64        `json:"trade_time,omitempty"`
+	QuoteSource    string       `json:"quote_source,omitempty"`
+	UpdateMode     string       `json:"update_mode"`
+	Session        string       `json:"session"`
+	Description    string       `json:"description"`
+	RTTMs          float64      `json:"rtt_ms"`
+	ProviderSymbol string       `json:"provider_symbol,omitempty"`
+	Reference      bool         `json:"reference,omitempty"`
+	DelaySeconds   int          `json:"delay_seconds,omitempty"`
 }
 
 func (q Quote) Previous() float64 {
@@ -633,7 +636,7 @@ func resolveIndexSession(sym string, now time.Time, tradeTime int64) (SessionSta
 		case mins >= 8*60+30 && mins < 9*60:
 			return StatePreMarket, "集合竞价 (Pre-Market)"
 		case mins >= 9*60 && mins <= 15*60+31:
-			return StateRegular, "盘中实时 (Regular)"
+			return StateRegular, "盘中 (Regular)"
 		default:
 			return StateClosed, "休市 (Closed)"
 		}
@@ -649,7 +652,7 @@ func resolveIndexSession(sym string, now time.Time, tradeTime int64) (SessionSta
 		case mins >= 8*60+30 && mins < 9*60:
 			return StatePreMarket, "盘前 (Pre-Market)"
 		case mins >= 9*60 && mins <= 17*60+36:
-			return StateRegular, "盘中实时 (Regular)"
+			return StateRegular, "盘中 (Regular)"
 		default:
 			return StateClosed, "休市 (Closed)"
 		}
@@ -822,6 +825,10 @@ func ParseTencentQuoteBatch(expectedSymbols []string, body []byte, rttMs float64
 				out[sym] = SymbolResult{Err: "全球指数行情字段不足"}
 				continue
 			}
+			if strings.TrimSpace(parts[0]) != strings.TrimPrefix(sym, "^") {
+				out[sym] = SymbolResult{Err: "全球指数标识不匹配"}
+				continue
+			}
 			price, err1 := strconv.ParseFloat(strings.TrimSpace(parts[3]), 64)
 			changeAbs, err2 := strconv.ParseFloat(strings.TrimSpace(parts[4]), 64)
 			if err1 != nil || err2 != nil || price <= 0 {
@@ -844,6 +851,10 @@ func ParseTencentQuoteBatch(expectedSymbols []string, body []byte, rttMs float64
 			if t, err := time.ParseInLocation("2006-01-02 15:04:05", tsRaw, cstZone); err == nil {
 				tradeTime = t.Unix()
 			}
+			if tradeTime == 0 || tradeTime > now.Add(30*time.Second).Unix() {
+				out[sym] = SymbolResult{Err: "全球指数行情时间无效"}
+				continue
+			}
 
 			cur := currencyForSymbol(sym)
 			state, session := resolveIndexSession(sym, now, tradeTime)
@@ -864,8 +875,8 @@ func ParseTencentQuoteBatch(expectedSymbols []string, body []byte, rttMs float64
 				MarketState:   "REGULAR",
 				State:         state,
 				TradeTime:     tradeTime,
-				QuoteSource:   "Tencent Real Time",
-				UpdateMode:    "asia_realtime",
+				QuoteSource:   "Tencent Finance（备用指数）",
+				UpdateMode:    "global_index_quote",
 				Session:       session,
 				Description:   desc,
 				RTTMs:         rttMs,
@@ -1277,8 +1288,13 @@ func (v View) EffectiveState() SessionState {
 
 func (v View) Tooltip() string {
 	status := "实时数据正常"
-	if isTrackedSZETF(v.Symbol) || watchlist.IsMainlandETF(v.Symbol) {
+	if isTrackedSZETF(v.Symbol) || watchlist.IsMainlandETF(v.Symbol) || isGlobalIndex(v.Symbol) {
 		status = "行情数据正常"
+	}
+	if v.Quote != nil {
+		if tag := v.Quote.FeedTag(time.Now()); tag != "" {
+			status += "（" + tag + "）"
+		}
 	}
 	if !v.Healthy {
 		status = "数据异常 — " + v.Reason
@@ -1298,6 +1314,9 @@ func (v View) Tooltip() string {
 	}
 	if v.Quote != nil {
 		tradeInfo := ""
+		if isGlobalIndex(v.Symbol) && v.Quote.TradeTime == 0 {
+			tradeInfo = "；源未提供逐笔时间（轮询时间不代表行情时间）"
+		}
 		if v.Quote.TradeTime > 0 {
 			tradeAge := time.Now().Unix() - v.Quote.TradeTime
 			if tradeAge < 0 {
@@ -1325,6 +1344,9 @@ func (v View) Tooltip() string {
 		if v.Quote.QuoteSource != "" {
 			srcInfo = "；数据源: " + v.Quote.QuoteSource
 		}
+		if isGlobalIndex(v.Symbol) && v.Quote.UpdateMode == "streaming" {
+			srcInfo += "；源标记实时"
+		}
 		decimals := PriceDecimals(v.Symbol)
 		description := v.Quote.Description
 		if isTrackedSZETF(v.Symbol) {
@@ -1332,7 +1354,11 @@ func (v View) Tooltip() string {
 				description = commodityDescriptions[v.Symbol]
 			}
 		} else {
-			description = fmt.Sprintf("%s (%s)", description, TickerFor(v.Symbol))
+			ticker := TickerFor(v.Symbol)
+			if v.Quote.ProviderSymbol != "" {
+				ticker = v.Quote.ProviderSymbol
+			}
+			description = fmt.Sprintf("%s (%s)", description, ticker)
 		}
 		return fmt.Sprintf("%s %s: %.*f (%+.2f%%, 涨跌 %+.*f, 常规收盘 %.*f) | %s\n  %s；时段: %s %s%s%s；%s",
 			stateBadge, name, decimals, v.Quote.Price, v.Quote.ChangePercent, decimals, v.Quote.ChangeAbs, decimals, v.Quote.RegularPrice, status,

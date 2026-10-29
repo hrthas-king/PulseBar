@@ -61,13 +61,15 @@ Samuel 原名 PulseBar，将网络感知与双标的行情显示组合在一条�
 | --- | --- |
 | 标普 / 纳指 | VOO / QQQ（默认） |
 | 半导体 ETF | SOXX / SMH |
-| 美股 | NVDA / MSFT |
+| 美股市值前二（2026-10-29 核对） | NVIDIA / Apple（NVDA / AAPL） |
 | 商品 | 黄金 / 布伦特原油 |
 | A 股指数 | 上证指数 / 创业板指数 |
 | 港股指数 | 恒生指数 / 恒生科技指数 |
 | 日韩指数 | 日经 225 / 韩国综合指数 |
 | 欧洲指数 | 法国 CAC 40 / 德国 DAX |
 | 国内场内 ETF | 华安纳指 ETF / 华夏标普 500 ETF（159632 / 159655） |
+
+“美股市值前二”是按菜单注明日期核对的固定组合，依据 [Stock Analysis](https://stockanalysis.com/list/largest-us-companies/) 与 [CompaniesMarketCap](https://companiesmarketcap.com/usa/largest-companies-in-the-usa-by-market-cap/) 的公司市值榜单配置；行情持续刷新，市值排名变化时需重新核对组合。
 
 可显示盘前、盘中、盘后、夜盘和休市状态；可用时段由标的与数据源决定。国内场内 ETF 按上市交易所的交易时段成交，价格显示三位小数；休市、停牌或没有新成交时，可能保留上一笔报价。
 
@@ -97,13 +99,13 @@ Samuel 原名 PulseBar，将网络感知与双标的行情显示组合在一条�
 git clone https://github.com/hrthas-king/Samuel.git
 cd Samuel
 ./scripts/verify.ps1
-./scripts/build.ps1 -Arch amd64 -Version v1.0.2
+./scripts/build.ps1 -Arch amd64 -Version v1.0.3
 ```
 
 构建脚本输出 `dist/Samuel-windows-amd64.exe`；ARM 设备可将 `-Arch amd64` 改为 `-Arch arm64`。`verify.ps1` 包含自动测试、静态检查、格式检查与双架构构建。也可以创建包含文档的发布压缩包：
 
 ```powershell
-./scripts/package.ps1 -Version v1.0.2
+./scripts/package.ps1 -Version v1.0.3
 ```
 
 常用命令（在可执行文件所在目录运行）：

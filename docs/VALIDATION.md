@@ -1,6 +1,23 @@
 # 验证记录 (Validation)
 
-## v1.0.2：TUN 环境上下行流量统计修复（最新）
+## v1.0.3：美股市值前二组合核对（最新）
+
+验证日期：**2026-10-29 美东时间**。
+
+- 对照 [Stock Analysis](https://stockanalysis.com/list/largest-us-companies/) 与 [CompaniesMarketCap](https://companiesmarketcap.com/usa/largest-companies-in-the-usa-by-market-cap/) 的美国公司市值榜单，两者前两位均为 NVIDIA、Apple；原组合固定为 NVDA / MSFT，已改为 **NVDA / AAPL**，并在菜单标明核对日期。这是按日期核对的固定组合，不自动扫描或更新市值排名。
+- 沿用 `top2_us` 组合标识，保存过该组的配置可继续使用；补充 Apple 的 TradingView 标识。菜单选项与实际行情请求使用相同的组合定义。
+- 默认自动测试 **68 项**（含子项共 **105 项**）、静态检查、格式检查及 Windows amd64 / arm64 构建通过；两个联网/交互测试默认跳过，ARM64 尚未真机运行。
+- 首次实连遇到上游请求超时，随后 20 秒独立行情检查与完整 GUI 冒烟均成功：NVDA、AAPL 均返回有效的 `EQUITY / USD` 行情，健康状态正常。该次 GUI 私有工作集 **7,958,528 字节（约 7.59 MiB）**，GDI / USER 对象数 **15 / 12**；实连结果不保证上游持续可用或零延迟。
+- 本机已更新至 v1.0.3，实际用户配置内容与更新前一致。本轮本地证据位于忽略目录 `.artifacts/top2-recheck/`，未加入程序运行依赖。
+
+本轮本机产物 SHA-256（GitHub Actions 工具链不同，可能产生不同哈希）：
+
+```text
+E4235907AE074EE651806DD5536468CBEDFCD0BB9F198D97AD79481E6B256F60  Samuel.exe / dist/Samuel-windows-amd64.exe
+8850189058563F2D83616355DB7E1C18AF0C7319F285130B7683BB4AAD869D83  dist/Samuel-windows-arm64.exe
+```
+
+## v1.0.2：TUN 环境上下行流量统计修复（历史）
 
 验证日期：**2026-10-29 美东时间**。
 

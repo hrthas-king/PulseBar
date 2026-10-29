@@ -13,10 +13,11 @@ import (
 )
 
 var (
-	fluentMenuCount = user32.NewProc("GetMenuItemCount")
-	fluentMenuInfo  = user32.NewProc("GetMenuItemInfoW")
-	fluentWindows   sync.Map
-	fluentProcedure uintptr
+	fluentMenuCount  = user32.NewProc("GetMenuItemCount")
+	fluentMenuInfo   = user32.NewProc("GetMenuItemInfoW")
+	fluentAdjustRect = user32.NewProc("AdjustWindowRectEx")
+	fluentWindows    sync.Map
+	fluentProcedure  uintptr
 )
 
 func init() { fluentProcedure = syscall.NewCallback(fluentMenuProc) }
@@ -88,6 +89,8 @@ type fluentPopup struct {
 	hover, childIndex              int
 	hoverSince                     time.Time
 	hoverPending                   bool
+	hoverSwitchIndex               int
+	hoverSwitchDeadline            time.Time
 }
 
 func (u *UI) closeFluentMenu() {
@@ -164,8 +167,12 @@ func (p *fluentPopup) rowBounds(index int) rect {
 	return rect{}
 }
 func (p *fluentPopup) hit(at point) int {
+	if at.X < 0 || at.X >= p.width {
+		return -1
+	}
 	for i, e := range p.entries {
-		if e.enabled && !e.separator && within(p.rowBounds(i), at) {
+		r := p.rowBounds(i)
+		if e.enabled && !e.separator && at.Y >= r.Top && at.Y < r.Bottom {
 			return i
 		}
 	}
@@ -188,15 +195,24 @@ func (s *fluentMenu) open(entries []fluentEntry, at point, parent *fluentPopup) 
 	fluentReleaseDC.Call(0, dc)
 	p.content += v.px(12)
 	work := popupWorkArea(at)
-	p.width = min(p.width, work.Right-work.Left-v.px(16))
-	p.height = min(p.content, work.Bottom-work.Top-v.px(16))
-	x, y := at.X, at.Y
-	if parent != nil && x+p.width > work.Right-v.px(8) {
-		x = parent.bounds.Left - p.width + v.px(3)
+	ex := uintptr(0x8 | 0x80)
+	if parent != nil {
+		ex |= 0x08000000
 	}
-	x = max(work.Left+v.px(8), min(x, work.Right-p.width-v.px(8)))
-	y = max(work.Top+v.px(8), min(y, work.Bottom-p.height-v.px(8)))
-	p.bounds = rect{x, y, x + p.width, y + p.height}
+	style := uintptr(0x80000000 | 0x00800000)
+	var frame rect
+	fluentAdjustRect.Call(uintptr(unsafe.Pointer(&frame)), style, 0, ex)
+	frameWidth, frameHeight := frame.Right-frame.Left, frame.Bottom-frame.Top
+	p.width = min(p.width, work.Right-work.Left-v.px(16)-frameWidth)
+	p.height = min(p.content, work.Bottom-work.Top-v.px(16)-frameHeight)
+	outerWidth, outerHeight := p.width+frameWidth, p.height+frameHeight
+	x, y := at.X, at.Y
+	if parent != nil && x+outerWidth > work.Right-v.px(8) {
+		x = parent.bounds.Left - outerWidth + v.px(3)
+	}
+	x = max(work.Left+v.px(8), min(x, work.Right-outerWidth-v.px(8)))
+	y = max(work.Top+v.px(8), min(y, work.Bottom-outerHeight-v.px(8)))
+	p.bounds = rect{x, y, x + outerWidth, y + outerHeight}
 	instance := s.u.instance
 	if instance == 0 {
 		instance, _, _ = getModule.Call(0)
@@ -207,12 +223,8 @@ func (s *fluentMenu) open(entries []fluentEntry, at point, parent *fluentPopup) 
 	if atom, _, err := registerClass.Call(uintptr(unsafe.Pointer(&wc))); atom == 0 && err != syscall.Errno(1410) {
 		return false
 	}
-	ex := uintptr(0x8 | 0x80)
-	if parent != nil {
-		ex |= 0x08000000
-	}
 	title := winapi.UTF16("PulseBar 菜单")
-	hwnd, _, _ := createWindow.Call(ex, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), 0x80000000|0x00800000, uintptr(x), uintptr(y), uintptr(p.width), uintptr(p.height), s.u.hwnd, 0, instance, 0)
+	hwnd, _, _ := createWindow.Call(ex, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), style, uintptr(x), uintptr(y), uintptr(outerWidth), uintptr(outerHeight), s.u.hwnd, 0, instance, 0)
 	if hwnd == 0 {
 		return false
 	}
@@ -253,6 +265,7 @@ func (p *fluentPopup) openChild(index int) {
 	s.open(p.entries[index].children, point{p.bounds.Right - s.visual.px(3), p.bounds.Top + r.Top}, p)
 }
 func (p *fluentPopup) setHover(index int) {
+	p.hoverSwitchDeadline = time.Time{}
 	if index == p.hover {
 		return
 	}
@@ -267,6 +280,56 @@ func (p *fluentPopup) setHover(index int) {
 	}
 	p.childIndex = -1
 	invalidateRect.Call(p.hwnd, 0, 0)
+}
+
+// Give the pointer time to cross the parent on its way into a cascade on either side.
+func (p *fluentPopup) pointerMove(at point, now time.Time) {
+	s := p.menu
+	depth := -1
+	for i, w := range s.windows {
+		if w == p {
+			depth = i
+			break
+		}
+		w.hoverSwitchDeadline = time.Time{}
+	}
+	if depth < 0 {
+		return
+	}
+	index := p.hit(at)
+	if len(s.windows) > depth+1 && index != p.hover {
+		if p.hoverSwitchDeadline.IsZero() || index != p.hoverSwitchIndex {
+			p.hoverSwitchIndex = index
+			p.hoverSwitchDeadline = now.Add(300 * time.Millisecond)
+		}
+		return
+	}
+	p.setHover(index)
+	p.hoverPending = true
+}
+
+func (s *fluentMenu) advanceHover(now time.Time, cursor point) {
+	hovered := -1
+	for i, w := range s.windows {
+		if within(w.bounds, cursor) {
+			hovered = i
+		}
+	}
+	for i := 0; i < hovered; i++ {
+		s.windows[i].hoverSwitchDeadline = time.Time{}
+	}
+	for i := 0; i < len(s.windows); i++ {
+		w := s.windows[i]
+		if hovered == i && !w.hoverSwitchDeadline.IsZero() && !now.Before(w.hoverSwitchDeadline) {
+			index := w.hoverSwitchIndex
+			w.setHover(index)
+			w.openChild(index)
+		}
+		if w.hoverPending && w.hover >= 0 && now.Sub(w.hoverSince) >= 180*time.Millisecond {
+			w.hoverPending = false
+			w.openChild(w.hover)
+		}
+	}
 }
 func (p *fluentPopup) scroll(pixels int32) {
 	next := max(int32(0), min(p.offset+pixels, p.content-p.height))
@@ -344,12 +407,7 @@ func (s *fluentMenu) tick() {
 		s.close()
 		return
 	}
-	for _, w := range s.windows {
-		if w.hoverPending && w.hover >= 0 && time.Since(w.hoverSince) >= 180*time.Millisecond {
-			w.hoverPending = false
-			w.openChild(w.hover)
-		}
-	}
+	s.advanceHover(time.Now(), cursor)
 }
 
 func fluentIcon(e fluentEntry) string {
@@ -428,11 +486,6 @@ func (p *fluentPopup) draw(dc uintptr) {
 			fluentText(dc, "\ue74d", rect{r.Right - v.px(27), r.Top, r.Right - v.px(7), r.Bottom}, v.icons, c.muted, 1)
 		}
 	}
-	if p.content > p.height {
-		h := max(v.px(20), p.height*p.height/p.content)
-		y := v.px(5) + (p.height-h-v.px(10))*p.offset/max(1, p.content-p.height)
-		fluentBox(dc, rect{p.width - v.px(4), y, p.width - v.px(2), y + h}, v.px(2), c.muted, c.muted)
-	}
 }
 
 func fluentMenuProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
@@ -454,8 +507,7 @@ func fluentMenuProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 			return 1
 		case 0x200:
 			at := point{int32(int16(lp & 0xffff)), int32(int16((lp >> 16) & 0xffff))}
-			p.setHover(p.hit(at))
-			p.hoverPending = true
+			p.pointerMove(at, time.Now())
 			return 0
 		case 0x202:
 			at := point{int32(int16(lp & 0xffff)), int32(int16((lp >> 16) & 0xffff))}
@@ -484,6 +536,10 @@ func fluentMenuProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		case 0x100, 0x104:
 			if len(s.windows) == 0 {
 				return 0
+			}
+			for _, w := range s.windows {
+				w.hoverSwitchDeadline = time.Time{}
+				w.hoverPending = false
 			}
 			current := s.windows[len(s.windows)-1]
 			switch wp {

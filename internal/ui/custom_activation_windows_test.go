@@ -47,18 +47,44 @@ func TestVisibleAddFromMenuRemainsOpen(t *testing.T) {
 	})
 	err := u.Run(ctx, func() {
 		setForeground.Call(u.hwnd)
-		u.menu()
+		menu, commands := u.buildMenu()
+		work := popupWorkArea(point{100, 100})
+		u.showFluentMenu(menu, point{work.Right - 20, work.Top + 100}, commands)
+		destroyMenu.Call(menu)
 		if u.flyout == nil {
 			t.Fatal("Fluent menu did not open")
 		}
 		root := u.flyout.windows[0]
+		moreIndex := -1
 		for i, e := range root.entries {
 			if strings.HasPrefix(e.label, "More") {
-				root.setHover(i)
+				moreIndex = i
 				break
 			}
 		}
-		sendMessage.Call(root.hwnd, 0x100, 39, 0) // More
+		if moreIndex < 0 {
+			t.Fatal("More entry missing")
+		}
+		r := root.rowBounds(moreIndex)
+		mouseMoveFluent(root, root.width/2, (r.Top+r.Bottom)/2)
+		u.flyout.advanceHover(time.Now().Add(200*time.Millisecond), point{root.bounds.Left + root.width/2, root.bounds.Top + (r.Top+r.Bottom)/2})
+		if len(u.flyout.windows) != 2 {
+			t.Fatal("hover did not open More")
+		}
+		child := u.flyout.windows[1]
+		if child.bounds.Left >= root.bounds.Left {
+			t.Fatal("visible test did not open to the left")
+		}
+		mouseMoveFluent(root, 3, (r.Top+r.Bottom)/2)
+		mouseMoveFluent(root, root.width/3, r.Top-3)
+		if len(u.flyout.windows) != 2 {
+			t.Fatal("left cascade closed during pointer crossing")
+		}
+		mouseMoveFluent(child, child.width-10, child.rowBounds(0).Top+10)
+		u.flyout.advanceHover(time.Now().Add(time.Second), point{child.bounds.Left + 20, child.bounds.Top + 20})
+		if len(u.flyout.windows) != 2 || u.flyout.windows[1] != child {
+			t.Fatal("left cascade closed after entry")
+		}
 		sendMessage.Call(root.hwnd, 0x100, 35, 0) // Other is the last entry.
 		sendMessage.Call(root.hwnd, 0x100, 39, 0) // Other
 		sendMessage.Call(root.hwnd, 0x100, 13, 0) // Add; must close menu before opening the input.

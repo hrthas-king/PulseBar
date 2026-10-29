@@ -11,13 +11,13 @@
 
 **合二为一的极轻量 Windows 任务栏网络脉搏（GeoPulse）与 VOO / QQQ 24小时全时段实时行情条（TickBar）。**
 
-当前版本：**v0.9.0（2026-10-28）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.9.0)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
+当前版本：**v0.9.1（2026-10-28）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.9.1)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
 
 双击单个 `~3.5 MiB`（amd64 本地构建）的 `.exe` 即可静默运行，同时在 **任务栏最左侧悬浮条** 与 **系统托盘** 展示：
 1. **GeoPulse 秒级网络感知**：公网出口两位国家代码、连通性状态灯（绿/黄/红）、上下行实时流量活动箭头（或一键展开实时网速与 HTTPS 请求延迟）、TUN/系统代理节点切换自动感知。
 2. **TickBar VOO / QQQ 24×5 全时段无缝实时行情**：追踪 `VOO`（标普 500 ETF）与 `QQQ`（纳斯达克 100 ETF），无缝覆盖美东时间周日 20:00 至周五 20:00 的 **夜盘（Overnight）+ 盘前（Pre-Market）+ 盘中（Regular）+ 盘后（Post-Market）** 24 小时连续实时价格流与日涨跌幅。
 
-纯 Go 标准库直接调用 Win32 GDI、Shell_NotifyIcon、IP Helper 与 WinHTTP 系统 API；无 CGo、无 Python 解释器打包、无 Electron/WebView，运行期第三方依赖为零。v0.9.0 的一次 10 秒 GUI 实测私有工作集约 **5.73 MiB**；完整资源记录及行情延迟的待验证范围详见 [验证记录](docs/VALIDATION.md)。
+纯 Go 标准库直接调用 Win32 GDI、Shell_NotifyIcon、IP Helper 与 WinHTTP 系统 API；无 CGo、无 Python 解释器打包、无 Electron/WebView，运行期第三方依赖为零。v0.9.1 的一次 10 秒 GUI 实测私有工作集约 **5.91 MiB**；完整资源记录及行情延迟的待验证范围详见 [验证记录](docs/VALIDATION.md)。
 
 ---
 
@@ -27,6 +27,7 @@
 
 - **Fluent 菜单与输入面板**：参考 TranslucentTB 的菜单视觉，采用圆角高亮、图标、分组分隔和统一留白，跟随 Windows 应用深浅色。支持悬停级联、方向键 / Enter / Esc、长列表滚动及组合行旁删除；输入面板统一为圆角输入框、强调色按钮和行内错误提示。透明行情条保持原有外观。
 - 菜单与输入面板按系统 DPI 显示，不随行情条的 75%～130% 大小设置缩小。高对比度或系统报告屏幕阅读器开启时，菜单使用原生菜单回退。
+- 鼠标横向或斜向移入左、右子菜单时保留父菜单，进入子菜单后取消待切换状态。菜单不显示滚动条；长列表仍可通过滚轮、方向键与 Home / End 浏览。
 
 <details>
 <summary>菜单与输入面板预览（深色 / 浅色）</summary>
@@ -100,11 +101,11 @@
 git clone https://github.com/hrthas-king/PulseBar.git
 cd PulseBar
 ./scripts/verify.ps1
-./scripts/build.ps1 -Arch amd64 -Version v0.9.0
+./scripts/build.ps1 -Arch amd64 -Version v0.9.1
 ./dist/PulseBar-windows-amd64.exe
 ```
 
-`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.9.0`。如需更新本机根目录运行副本：
+`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.9.1`。如需更新本机根目录运行副本：
 
 ```powershell
 Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
@@ -133,7 +134,7 @@ Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
 
 ```powershell
 ./scripts/generate-icons.ps1
-./scripts/package.ps1 -Version v0.9.0
+./scripts/package.ps1 -Version v0.9.1
 ```
 
 ---

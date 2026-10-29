@@ -43,7 +43,7 @@ func TestFluentMenuPreservesActionsAndSideDelete(t *testing.T) {
 	cfg := config.Default()
 	cfg.CustomPairs = []watchlist.Pair{pair}
 	cfg.MarketGroup = pair.ID()
-	u := NewUI("v0.9.0", cfg)
+	u := NewUI("v0.9.1", cfg)
 	menu, commands := u.buildMenu()
 	defer destroyMenu.Call(menu)
 	entries := readFluentMenu(menu, commands)
@@ -223,7 +223,7 @@ func TestFluentNativeLightDarkRenderingAndInputFocus(t *testing.T) {
 	defer runtime.UnlockOSThread()
 	cfg := config.Default()
 	cfg.UIScalePercent = 75
-	u := NewUI("v0.9.0", cfg)
+	u := NewUI("v0.9.1", cfg)
 	u.openCustomPanel(false)
 	defer u.closeCustomPanel()
 	p := u.customPanel

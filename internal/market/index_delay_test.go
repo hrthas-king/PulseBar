@@ -21,7 +21,11 @@ func TestGlobalIndexDelayIsNotReportedAsRealtime(t *testing.T) {
 	if strings.Contains(strings.ToLower(q.UpdateMode+q.QuoteSource), "real") || strings.Contains(q.SessionText(), "实时") {
 		t.Errorf("16-minute-old cash index claims real-time: %#v", q)
 	}
-	tip := (View{Symbol: q.Symbol, Quote: q, Healthy: true}).Tooltip()
+	// Tooltip uses the live clock; keep its age relative so this replay also
+	// remains valid on machines whose clock predates the captured quote.
+	tooltipQuote := *q
+	tooltipQuote.TradeTime = time.Now().Add(-16 * time.Minute).Unix()
+	tip := (View{Symbol: q.Symbol, Quote: &tooltipQuote, Healthy: true}).Tooltip()
 	if strings.Contains(tip, "实时数据正常") || !strings.Contains(tip, "延迟") {
 		t.Errorf("delayed index presented as live: %s", tip)
 	}

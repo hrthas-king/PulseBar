@@ -66,14 +66,31 @@ func TestLiveNativeCustomPairFlow(t *testing.T) {
 	if os.Getenv("PULSEBAR_LIVE_CUSTOM") != "1" {
 		t.Skip("live provider integration is opt-in")
 	}
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	defer market.SetCustomPairs(nil)
-	defer market.SetActiveGroup(market.DefaultGroup)
 	path := os.Getenv("PULSEBAR_LIVE_CONFIG")
 	if path == "" {
 		t.Fatal("an isolated test config path is required")
 	}
+	for _, tc := range []struct{ name, first, second string }{
+		{"mainland_stocks", "600519", "000858"},
+		{"shenzhen_etfs", "159632", "159655"},
+		{"shanghai_etfs", "513100", "513500"},
+		{"us_stocks", "aapl", "msft"},
+		{"us_etfs", "VOO", "QQQ"},
+		{"us_share_class", "brk.b", "AAPL"},
+		{"mixed_markets", "513500", "AAPL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runLiveNativeCustomPairFlow(t, path+"-"+tc.name+".json", tc.first, tc.second)
+		})
+	}
+}
+
+func runLiveNativeCustomPairFlow(t *testing.T, path, first, second string) {
+	t.Helper()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	defer market.SetCustomPairs(nil)
+	defer market.SetActiveGroup(market.DefaultGroup)
 	u := NewUI("live", config.Default())
 	u.saveSettings = func(c config.Config) error { return config.SaveTo(path, c) }
 	u.openCustomPanel(false)
@@ -81,8 +98,8 @@ func TestLiveNativeCustomPairFlow(t *testing.T) {
 	if u.customPanel == nil {
 		t.Fatal("native panel missing")
 	}
-	putPanelText(u.customPanel.first, "600519")
-	putPanelText(u.customPanel.second, "000858")
+	putPanelText(u.customPanel.first, first)
+	putPanelText(u.customPanel.second, second)
 	sendMessage.Call(u.customPanel.first, 0x100, 13, 0)
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
@@ -99,7 +116,7 @@ func TestLiveNativeCustomPairFlow(t *testing.T) {
 		}
 	}
 	loaded := config.LoadFrom(path)
-	p, _ := watchlist.NewPair("600519", "000858")
+	p, _ := watchlist.NewPair(first, second)
 	if loaded.MarketGroup != p.ID() || len(loaded.CustomPairs) != 1 {
 		t.Fatal("Enter did not persist selection")
 	}
@@ -116,7 +133,7 @@ func TestLiveNativeCustomPairFlow(t *testing.T) {
 		if q == nil {
 			t.Fatal(batch[sym].Err)
 		}
-		t.Logf("restored quote: %s %.2f (%s)", q.DisplayName(), q.Price, q.Session)
+		t.Logf("restored quote: %s %.*f (%s)", q.DisplayName(), market.PriceDecimals(sym), q.Price, q.Session)
 	}
 	u = NewUI("restarted", loaded)
 	u.saveSettings = func(c config.Config) error { return config.SaveTo(path, c) }
@@ -128,6 +145,27 @@ func TestLiveNativeCustomPairFlow(t *testing.T) {
 		t.Fatal("delete did not survive restart")
 	}
 	t.Log("native Enter -> live validation -> atomic save -> restart -> quotes -> delete/default -> restart: PASS")
+}
+
+func TestNativeCustomPanelAcceptsUSCodes(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	u := NewUI("test", config.Default())
+	u.openCustomPanel(false)
+	defer u.closeCustomPanel()
+	if u.customPanel == nil {
+		t.Fatal("native panel missing")
+	}
+	for _, c := range "BRK.B" {
+		sendMessage.Call(u.customPanel.first, 0x102, uintptr(c), 0) // WM_CHAR: exercise the real edit control.
+	}
+	if got := panelText(u.customPanel.first); got != "BRK.B" {
+		t.Fatalf("US ticker rejected by native input: %q", got)
+	}
+	sendMessage.Call(u.customPanel.second, 0xc, 0, uintptr(unsafe.Pointer(winapi.UTF16("513500"))))
+	if got := panelText(u.customPanel.second); got != "513500" {
+		t.Fatalf("mainland ETF input: %q", got)
+	}
 }
 
 func TestCustomSelectionRejectsPriorSnapshot(t *testing.T) {

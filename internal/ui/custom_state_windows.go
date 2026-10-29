@@ -58,7 +58,7 @@ func (u *UI) appendCustomMenu(parent uintptr, commands map[Action]customMenuComm
 			appendItem(menu, Action(0x10001+i*2), "删除该组合", 0)
 		}
 	}
-	p := winapi.UTF16("其他（自定义A股）")
+	p := winapi.UTF16("其他（自定义股票 / ETF）")
 	appendMenu.Call(parent, 0x10, menu, uintptr(unsafe.Pointer(p)))
 }
 
@@ -137,7 +137,7 @@ func (u *UI) submitCustomPair() {
 	p.busy = true
 	enableWindow.Call(p.first, 0)
 	enableWindow.Call(p.second, 0)
-	p.setStatus("正在核实股票代码…")
+	p.setStatus("正在核实股票 / ETF代码…")
 	enableWindow.Call(p.submit, 0)
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	u.customCancel = cancel

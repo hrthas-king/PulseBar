@@ -1,6 +1,8 @@
 package market
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -66,5 +68,71 @@ func TestCustomStockValidationRejectsFundAndMissingQuotes(t *testing.T) {
 	batch, err = ParseTencentQuoteBatch(symbols, []byte(`v_pv_none_match="1";`), 10, now)
 	if err == nil || batch[symbols[0]].Err == "" || batch[symbols[1]].Err == "" {
 		t.Fatal("nonexistent codes were accepted")
+	}
+}
+
+func TestCustomETFPairsAndPrecision(t *testing.T) {
+	symbols := []string{"513500.SS", "159632.SZ"}
+	body := customRow("sh", "513500", "标普500ETF", "ETF") + customRow("sz", "159632", "纳指ETF", "ETF")
+	batch, err := ParseTencentQuoteBatch(symbols, []byte(body), 10, time.Date(2026, 10, 28, 2, 0, 1, 0, time.UTC))
+	if err != nil || batch[symbols[0]].Quote == nil || batch[symbols[1]].Quote == nil {
+		t.Fatalf("ETF pair rejected: %+v, %v", batch, err)
+	}
+	for _, s := range symbols {
+		if batch[s].Quote.QuoteType != "ETF" || batch[s].Quote.Currency != "CNY" || PriceDecimals(s) != 3 {
+			t.Errorf("ETF type/precision: %s, %+v, decimals=%d", s, batch[s], PriceDecimals(s))
+		}
+	}
+}
+
+func TestCustomPairRoutesMixedMarketsAndKeepsPartialQuote(t *testing.T) {
+	var calls [][]string
+	batch, err := fetchCustomQuoteBatch(context.Background(), []string{"AAPL", "513500.SS"}, func(_ context.Context, symbols []string) (map[string]SymbolResult, error) {
+		calls = append(calls, append([]string(nil), symbols...))
+		if len(symbols) != 1 {
+			t.Fatalf("mixed provider request: %v", symbols)
+		}
+		if symbols[0] == "AAPL" {
+			return nil, errors.New("US provider unavailable")
+		}
+		return map[string]SymbolResult{symbols[0]: {Quote: &Quote{Symbol: symbols[0]}}}, nil
+	})
+	if err != nil || len(calls) != 2 || batch["513500.SS"].Quote == nil || batch["AAPL"].Err != "US provider unavailable" {
+		t.Fatalf("routing/partial failure: calls=%v batch=%+v err=%v", calls, batch, err)
+	}
+}
+
+func TestCustomYahooUSQuotesAndIsolation(t *testing.T) {
+	body := []byte(`{"quoteResponse":{"result":[
+		{"symbol":"AAPL","currency":"USD","quoteType":"EQUITY","shortName":"Apple Inc.","regularMarketPrice":101,"regularMarketChange":1,"regularMarketChangePercent":1,"regularMarketTime":1793196000,"marketState":"REGULAR","gmtOffSetMilliseconds":-14400000},
+		{"symbol":"VOO","currency":"USD","quoteType":"ETF","regularMarketPrice":101,"regularMarketChange":1,"regularMarketChangePercent":1}
+	]}}`)
+	batch, err := ParseYahooQuoteBatchForSymbols([]string{"AAPL", "MSFT"}, body, 10, time.Date(2026, 10, 28, 14, 0, 0, 0, time.UTC))
+	q := batch["AAPL"].Quote
+	if err != nil || q == nil || q.DisplayName() != "Apple Inc." || batch["MSFT"].Err == "" {
+		t.Fatalf("custom US quote: %+v, %v", batch, err)
+	}
+	if _, ok := batch["VOO"]; ok {
+		t.Fatal("unsolicited quote escaped the selected pair")
+	}
+}
+
+func TestCustomUSChartAndAssetValidation(t *testing.T) {
+	body := []byte(`{"chart":{"result":[{"meta":{"symbol":"AAPL","currency":"USD","instrumentType":"EQUITY","shortName":"Apple Inc.","regularMarketPrice":101,"chartPreviousClose":100,"regularMarketTime":1793196000,"gmtoffset":-14400}}]}}`)
+	q, err := ParseYahooChart("AAPL", body, 10, time.Date(2026, 10, 28, 14, 0, 0, 0, time.UTC))
+	if err != nil || q.DisplayName() != "Apple Inc." || q.ChangeAbs != 1 || q.ChangePercent != 1 {
+		t.Fatalf("custom chart quote: %+v, %v", q, err)
+	}
+	if _, err := ParseYahooChart("MSFT", body, 10, time.Now()); err == nil {
+		t.Fatal("chart returned a different stock")
+	}
+	for _, invalid := range []Quote{
+		{Symbol: "AAPL", Currency: "CNY", QuoteType: "EQUITY"},
+		{Symbol: "AAPL", Currency: "USD", QuoteType: "INDEX"},
+	} {
+		invalid.Price, invalid.ChangeAbs, invalid.ChangePercent, invalid.UpdateMode = 101, 1, 1, "regular_realtime"
+		if err := ValidateQuote(invalid); err == nil {
+			t.Fatalf("invalid US asset accepted: %+v", invalid)
+		}
 	}
 }

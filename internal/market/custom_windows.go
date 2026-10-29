@@ -41,17 +41,12 @@ func ValidateCustomPair(ctx context.Context, a, b string) (watchlist.Pair, error
 		return p, err
 	}
 	syms := p.Symbols()
-	query, _ := TencentQueryForSymbols(syms)
 	clientMu.Lock()
 	defer clientMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return watchlist.Pair{}, err
 	}
-	session, err := ensureSessionLocked()
-	if err != nil {
-		return watchlist.Pair{}, err
-	}
-	batch, err := fetchTencentRealtimeLocked(ctx, session, syms, query)
+	batch, err := fetchCustomQuoteBatch(ctx, syms, fetchSymbolsLocked)
 	for i, s := range syms {
 		r := batch[s]
 		if r.Quote == nil {

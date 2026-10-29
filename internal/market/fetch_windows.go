@@ -111,11 +111,17 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	syms := ActiveSymbols()
+	group := ActiveGroup()
 
 	clientMu.Lock()
 	defer clientMu.Unlock()
+	if strings.HasPrefix(group.ID, "custom_") {
+		return fetchCustomQuoteBatch(ctx, group.Symbols, fetchSymbolsLocked)
+	}
+	return fetchSymbolsLocked(ctx, group.Symbols)
+}
 
+func fetchSymbolsLocked(ctx context.Context, syms []string) (map[string]SymbolResult, error) {
 	session, err := ensureSessionLocked()
 	if err != nil {
 		return nil, err
@@ -127,9 +133,9 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 		if tErr == nil {
 			return tBatch, nil
 		}
-		// 没有验证 Yahoo 对这两只 ETF 的实时权限；腾讯失败时直接报告错误。
+		// 中国市场股票和ETF保留腾讯数据源；失败时不混入时效未经核实的Yahoo报价。
 		if customSymbols(syms) || (len(syms) == 2 && isTrackedSZETF(syms[0]) && isTrackedSZETF(syms[1])) {
-			return tBatch, fmt.Errorf("腾讯 ETF 行情请求失败: %w", tErr)
+			return tBatch, fmt.Errorf("腾讯中国市场行情请求失败: %w", tErr)
 		}
 	}
 
@@ -144,7 +150,7 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 	if sErr != nil {
 		return nil, err
 	}
-	fbCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	fbCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	return fetchV8FallbackLocked(fbCtx, fbSession, syms, err)
 }

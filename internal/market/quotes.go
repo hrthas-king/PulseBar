@@ -188,13 +188,20 @@ func AliasFor(symbol string) string {
 	return symbol
 }
 
+func quoteAlias(symbol, name string) string {
+	if alias, ok := Aliases[symbol]; ok {
+		return alias
+	}
+	return name
+}
+
 func isTrackedSZETF(symbol string) bool {
 	return symbol == "159632.SZ" || symbol == "159655.SZ"
 }
 
 // PriceDecimals returns the number of decimal places used for displayed prices.
 func PriceDecimals(symbol string) int {
-	if isTrackedSZETF(symbol) {
+	if isTrackedSZETF(symbol) || watchlist.IsMainlandETF(symbol) {
 		return 3
 	}
 	return 2
@@ -259,6 +266,9 @@ func (q Quote) DisplayName() string {
 func ValidateQuote(q Quote) error {
 	if _, ok := Tickers[q.Symbol]; !ok && !watchlist.IsSymbol(q.Symbol) {
 		return fmt.Errorf("标的不匹配 (%s)", q.Symbol)
+	}
+	if watchlist.IsUSSymbol(q.Symbol) && (q.Currency != "USD" || (q.QuoteType != "EQUITY" && q.QuoteType != "ETF")) {
+		return fmt.Errorf("美股代码必须对应美元计价的股票或ETF")
 	}
 	for _, v := range []float64{q.Price, q.ChangePercent, q.ChangeAbs, q.RTTMs} {
 		if math.IsNaN(v) || math.IsInf(v, 0) {
@@ -718,7 +728,7 @@ func TencentQueryForSymbols(symbols []string) (string, bool) {
 
 // ParseTencentQuoteBatch 解析腾讯行情接口 (qt.gtimg.cn) 返回的行情数据。
 func ParseTencentQuoteBatch(expectedSymbols []string, body []byte, rttMs float64, now time.Time) (map[string]SymbolResult, error) {
-	if customSymbols(expectedSymbols) {
+	if customSymbols(expectedSymbols) && !(len(expectedSymbols) == 2 && isTrackedSZETF(expectedSymbols[0]) && isTrackedSZETF(expectedSymbols[1])) {
 		return parseCustomQuoteBatch(expectedSymbols, body, rttMs, now)
 	}
 	if len(body) > MaxBody {
@@ -981,24 +991,34 @@ func ParseYahooQuoteBatchForSymbols(expectedSymbols []string, body []byte, rttMs
 	}
 
 	out := make(map[string]SymbolResult, len(expectedSymbols))
-	var anySuccess bool
+	expected := make(map[string]bool, len(expectedSymbols))
+	for _, sym := range expectedSymbols {
+		expected[sym] = true
+	}
 	for _, item := range resp.QuoteResponse.Result {
 		item.Symbol = normalizeSymbol(item.Symbol)
-		if _, ok := Tickers[item.Symbol]; !ok {
+		if !expected[item.Symbol] {
+			continue
+		}
+		if _, duplicate := out[item.Symbol]; duplicate {
+			out[item.Symbol] = SymbolResult{Err: "重复的标的行情"}
 			continue
 		}
 		q, err := parseYahooQuoteItem(item, rttMs, now)
 		if err != nil {
 			out[item.Symbol] = SymbolResult{Err: err.Error()}
 		} else {
-			anySuccess = true
 			qCopy := q
 			out[item.Symbol] = SymbolResult{Quote: &qCopy}
 		}
 	}
+	var anySuccess bool
 	for _, sym := range expectedSymbols {
 		if _, ok := out[sym]; !ok {
 			out[sym] = SymbolResult{Err: "缺少标的响应"}
+		}
+		if out[sym].Quote != nil {
+			anySuccess = true
 		}
 	}
 	if !anySuccess {
@@ -1078,7 +1098,7 @@ func parseYahooQuoteItem(item yahooQuoteItem, rttMs float64, now time.Time) (Quo
 
 	q := Quote{
 		Symbol:        item.Symbol,
-		Alias:         AliasFor(item.Symbol),
+		Alias:         quoteAlias(item.Symbol, desc),
 		Price:         chosen.price,
 		ChangePercent: chosen.changePct,
 		ChangeAbs:     chosen.changeAbs,
@@ -1196,7 +1216,7 @@ func ParseYahooChart(expectedSymbol string, body []byte, rttMs float64, now time
 
 	q := Quote{
 		Symbol:        expectedSymbol,
-		Alias:         AliasFor(expectedSymbol),
+		Alias:         quoteAlias(expectedSymbol, desc),
 		Price:         price,
 		ChangePercent: changePct,
 		ChangeAbs:     changeAbs,
@@ -1256,7 +1276,7 @@ func (v View) EffectiveState() SessionState {
 
 func (v View) Tooltip() string {
 	status := "实时数据正常"
-	if isTrackedSZETF(v.Symbol) {
+	if isTrackedSZETF(v.Symbol) || watchlist.IsMainlandETF(v.Symbol) {
 		status = "行情数据正常"
 	}
 	if !v.Healthy {

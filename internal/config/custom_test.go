@@ -52,3 +52,30 @@ func TestCustomPairPersistenceAndDeletion(t *testing.T) {
 		t.Fatal("invalid save changed disk")
 	}
 }
+
+func TestETFAndUSPairPersistence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	c := Default()
+	for _, codes := range [][2]string{{"513500", "159632"}, {"aapl", "msft"}, {"513100", "QQQ"}} {
+		p, err := watchlist.NewPair(codes[0], codes[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err = c.AddPair(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SaveTo(path, c); err != nil {
+		t.Fatal(err)
+	}
+	loaded := LoadFrom(path)
+	if len(loaded.CustomPairs) != 3 || loaded.CustomPairs[1].Code1 != "AAPL" || loaded.MarketGroup != "custom_513100_QQQ" {
+		t.Fatalf("custom market pairs lost after restart: %+v", loaded)
+	}
+	p, _ := watchlist.NewPair("AAPL", "MSFT")
+	duplicate, err := loaded.AddPair(p)
+	if err != nil || len(duplicate.CustomPairs) != 3 || duplicate.MarketGroup != p.ID() {
+		t.Fatalf("case normalization created duplicate: %+v, %v", duplicate, err)
+	}
+}

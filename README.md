@@ -11,7 +11,7 @@
 
 **合二为一的极轻量 Windows 任务栏网络脉搏（GeoPulse）与 VOO / QQQ 24小时全时段实时行情条（TickBar）。**
 
-当前版本：**v0.7.1（2026-10-28）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.7.1)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
+当前版本：**v0.8.0（2026-10-28）**。下载程序请前往 [GitHub Releases](https://github.com/hrthas-king/PulseBar/releases/tag/v0.8.0)，检查结果与待验证事项见 [验证记录](docs/VALIDATION.md)。
 
 双击单个 `~3.4 MiB`（amd64 本地构建）的 `.exe` 即可静默运行，同时在 **任务栏最左侧悬浮条** 与 **系统托盘** 展示：
 1. **GeoPulse 秒级网络感知**：公网出口两位国家代码、连通性状态灯（绿/黄/红）、上下行实时流量活动箭头（或一键展开实时网速与 HTTPS 请求延迟）、TUN/系统代理节点切换自动感知。
@@ -68,14 +68,16 @@
 
 ---
 
-### 4. 其他（自定义A股）
+### 4. 其他（自定义股票 / ETF）
 
-- 右键悬浮条或托盘图标，进入 **More → 其他（自定义A股） → + 新增组合**。
-- 鼠标旁弹出置顶、无边框输入浮窗，分别输入股票1和股票2的六位数字代码。按 **Enter** 或点击 **添加并显示** 提交；点击外部区域、按 Esc 或点击取消会关闭。
-- 自动匹配沪市 `6`、深市 `0/3`、北交所 `4/8`，并兼容北交所现行 `92` 号段。联网核实股票确实存在且为 A 股；错误直接显示在输入浮窗内，校验期间界面可继续操作。
+- 右键悬浮条或托盘图标，进入 **More → 其他（自定义股票 / ETF） → + 新增组合**。
+- 鼠标旁弹出置顶、无边框输入浮窗，分别输入两个代码。支持国内股票、场内 ETF 和美股股票/ETF，可以混合配对。按 **Enter** 或点击 **添加并显示** 提交；点击外部区域、按 Esc 或点击取消会关闭。
+- 国内输入六位数字：沪市 `5/6`、深市 `0/1/3`、北交所 `4/8`，并兼容北交所现行 `92` 号段。`5` 开头的沪市 ETF 以及 `159632`、`159655` 等深市 ETF 均可添加，场内成交价保留三位小数。
+- 美股输入字母代码，如 `AAPL`、`MSFT`、`VOO`、`QQQ`，自动转为大写；`BRK.B` 与 `BRK-B` 统一为 `BRK-B`。联网核实代码对应股票或 ETF；错误直接显示在输入浮窗内，校验期间界面可继续操作。
+- 示例组合：`513100 & 513500`（沪市纳指/标普500 ETF）、`159632 & 159655`、`AAPL & MSFT`、`VOO & QQQ`，也可使用 `513500 & AAPL`。
 - 保存成功后立即切换到新组合。历史列表按 `600519 & 000858` 显示，点击组合可直接切换；旁侧的 **删除该组合** 可移除该条记录。删除当前组后自动回到默认第一组，删除其他组不改变当前选择。
 - 组合列表与当前选择一起原子保存到 `%LOCALAPPDATA%\PulseBar\config.json`，重启后恢复。重复添加同一有序组合会选择已存记录。
-- 任务栏显示行情源返回的股票名称、价格与涨跌幅。行情遵循中国市场时段，休市或暂停成交时可能保留旧报价；悬停可查行情时间。旧北交所代码无有效返回时，请使用交易所现行代码。
+- 国内股票和 ETF 采用腾讯财经，美股沿用 Yahoo Finance v7/v8；混合组合按各自市场取价、显示币种和交易时段。任务栏使用已有简称或行情源返回的名称。休市或暂停成交时可能保留旧报价；悬停可查行情时间，实际更新时效由上游数据源决定。旧北交所代码无有效返回时，请使用交易所现行代码。
 
 ## 快速构建与验证
 
@@ -85,11 +87,11 @@
 git clone https://github.com/hrthas-king/PulseBar.git
 cd PulseBar
 ./scripts/verify.ps1
-./scripts/build.ps1 -Arch amd64 -Version v0.7.1
+./scripts/build.ps1 -Arch amd64 -Version v0.8.0
 ./dist/PulseBar-windows-amd64.exe
 ```
 
-`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.7.1`。如需更新本机根目录运行副本：
+`verify.ps1` 会生成用于构建检查的 `dev` 程序；其后的 `build.ps1` 将运行版本设为 `v0.8.0`。如需更新本机根目录运行副本：
 
 ```powershell
 Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
@@ -118,7 +120,7 @@ Copy-Item ./dist/PulseBar-windows-amd64.exe ./PulseBar.exe -Force
 
 ```powershell
 ./scripts/generate-icons.ps1
-./scripts/package.ps1 -Version v0.7.1
+./scripts/package.ps1 -Version v0.8.0
 ```
 
 ---

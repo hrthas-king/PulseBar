@@ -104,7 +104,7 @@ func (u *UI) openCustomPanel(show bool) {
 			y = info.Work.Top
 		}
 	}
-	title := winapi.UTF16("新增自定义A股组合")
+	title := winapi.UTF16("新增自定义股票 / ETF组合")
 	hwnd, _, err := createWindow.Call(0x8|0x80, uintptr(unsafe.Pointer(cls)), uintptr(unsafe.Pointer(title)), 0x80000000, uintptr(x), uintptr(y), uintptr(w), uintptr(h), u.hwnd, 0, instance, 0)
 	if hwnd == 0 {
 		ShowError(winapi.Error("CreateWindowExW", err))
@@ -121,12 +121,12 @@ func (u *UI) openCustomPanel(show bool) {
 		}
 		return control
 	}
-	child("STATIC", "自定义A股组合", 0, 0, 14, 10, 300, 24)
+	child("STATIC", "自定义股票 / ETF组合", 0, 0, 14, 10, 300, 24)
 	child("STATIC", "股票1", 0, 0, 14, 44, 54, 22)
-	p.first = child("EDIT", "", 0x800000|0x10000|0x80|0x2000, 1, 72, 40, 250, 27)
+	p.first = child("EDIT", "", 0x800000|0x10000|0x80, 1, 72, 40, 250, 27)
 	child("STATIC", "股票2", 0, 0, 14, 80, 54, 22)
-	p.second = child("EDIT", "", 0x800000|0x10000|0x80|0x2000, 2, 72, 76, 250, 27)
-	p.status = child("STATIC", "输入6位代码，Enter提交；点击外部关闭", 0, 0, 14, 113, 308, 48)
+	p.second = child("EDIT", "", 0x800000|0x10000|0x80, 2, 72, 76, 250, 27)
+	p.status = child("STATIC", "沪深北6位代码 / 美股代码（如AAPL）\nEnter提交；点击外部关闭", 0, 0, 14, 113, 308, 48)
 	p.submit = child("BUTTON", "添加并显示", 0x10000, 3, 116, 172, 118, 30)
 	child("BUTTON", "取消", 0x10000, 4, 242, 172, 80, 30)
 	if p.first == 0 || p.second == 0 || p.submit == 0 || p.status == 0 {
@@ -135,7 +135,7 @@ func (u *UI) openCustomPanel(show bool) {
 		return
 	}
 	for _, edit := range []uintptr{p.first, p.second} {
-		sendMessage.Call(edit, 0xc5, 6, 0) // EM_SETLIMITTEXT
+		sendMessage.Call(edit, 0xc5, 10, 0) // EM_SETLIMITTEXT: also allow US share classes.
 		original, _, _ := setWindowLongPtr.Call(edit, ^uintptr(3), editProcedure)
 		panelEdits.Store(edit, editBinding{p, original})
 	}

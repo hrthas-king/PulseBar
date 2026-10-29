@@ -1,6 +1,7 @@
 package market
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -50,16 +51,63 @@ func groupByIDLocked(id string) GroupSpec {
 	return cloneGroup(Groups[0])
 }
 func customSymbols(s []string) bool {
-	return len(s) == 2 && watchlist.IsSymbol(s[0]) && watchlist.IsSymbol(s[1])
+	if len(s) == 0 {
+		return false
+	}
+	for _, symbol := range s {
+		if !watchlist.IsMainlandSymbol(symbol) {
+			return false
+		}
+	}
+	return true
 }
 func TickerFor(s string) string {
 	if t, ok := Tickers[s]; ok {
 		return t
 	}
-	if watchlist.IsSymbol(s) {
+	if watchlist.IsMainlandSymbol(s) {
 		return map[string]string{".SS": "SSE:", ".SZ": "SZSE:", ".BJ": "BSE:"}[s[6:]] + s[:6]
 	}
 	return s
+}
+
+// Each market uses its existing provider; a failure in one market leaves the other result usable.
+func fetchCustomQuoteBatch(ctx context.Context, symbols []string, fetch func(context.Context, []string) (map[string]SymbolResult, error)) (map[string]SymbolResult, error) {
+	var mainland, us []string
+	for _, s := range symbols {
+		if watchlist.IsMainlandSymbol(s) {
+			mainland = append(mainland, s)
+		} else {
+			us = append(us, s)
+		}
+	}
+	out := make(map[string]SymbolResult, len(symbols))
+	good := false
+	for _, subset := range [][]string{mainland, us} {
+		if len(subset) == 0 {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		batch, err := fetch(ctx, subset)
+		for _, s := range subset {
+			r := batch[s]
+			if r.Quote != nil {
+				good = true
+			} else if r.Err == "" {
+				r.Err = "未找到该标的，请核对代码"
+				if err != nil {
+					r.Err = err.Error()
+				}
+			}
+			out[s] = r
+		}
+	}
+	if !good {
+		return out, fmt.Errorf("未获取到有效股票或ETF行情")
+	}
+	return out, nil
 }
 
 func parseCustomQuoteBatch(symbols []string, body []byte, rtt float64, now time.Time) (map[string]SymbolResult, error) {
@@ -90,8 +138,11 @@ func parseCustomQuoteBatch(symbols []string, body []byte, rtt float64, now time.
 				return SymbolResult{Err: "不存在该股票或行情代码不匹配"}
 			}
 			kind := strings.TrimSpace(parts[61])
-			if !(strings.HasPrefix(kind, "GP-A") || (strings.HasSuffix(sym, ".BJ") && kind == "GP")) {
-				return SymbolResult{Err: "请输入中国市场A股代码，不能使用基金或指数代码"}
+			quoteType, mode := "EQUITY", "cn_stock_quote"
+			if watchlist.IsMainlandETF(sym) && kind == "ETF" {
+				quoteType, mode = "ETF", "cn_etf_quote"
+			} else if watchlist.IsMainlandETF(sym) || !(strings.HasPrefix(kind, "GP-A") || (strings.HasSuffix(sym, ".BJ") && kind == "GP")) {
+				return SymbolResult{Err: "请输入有效的A股或场内ETF代码"}
 			}
 			name, err := decodeQuoteName(parts[1])
 			if err != nil || strings.TrimSpace(name) == "" || len([]rune(name)) > 64 || strings.ContainsAny(name, "\x00\r\n\t") {
@@ -108,7 +159,7 @@ func parseCustomQuoteBatch(symbols []string, body []byte, rtt float64, now time.
 			} // suspended stock: retain the previous close
 			state, label := resolveMainlandSession(now, at.Unix())
 			change := price - prev
-			q := Quote{Symbol: sym, Alias: strings.TrimSpace(name), Description: strings.TrimSpace(name), Price: price, RegularPrice: prev, ChangeAbs: change, ChangePercent: change / prev * 100, Currency: "CNY", QuoteType: "EQUITY", State: state, Session: label, TradeTime: at.Unix(), QuoteSource: "Tencent Finance", UpdateMode: "cn_stock_quote", RTTMs: rtt, MarketState: "CLOSED"}
+			q := Quote{Symbol: sym, Alias: strings.TrimSpace(name), Description: strings.TrimSpace(name), Price: price, RegularPrice: prev, ChangeAbs: change, ChangePercent: change / prev * 100, Currency: "CNY", QuoteType: quoteType, State: state, Session: label, TradeTime: at.Unix(), QuoteSource: "Tencent Finance", UpdateMode: mode, RTTMs: rtt, MarketState: "CLOSED"}
 			if state == StateRegular {
 				q.MarketState = "REGULAR"
 			} else if state == StatePreMarket {
@@ -131,7 +182,7 @@ func parseCustomQuoteBatch(symbols []string, body []byte, rtt float64, now time.
 		}
 	}
 	if !good {
-		return out, fmt.Errorf("未获取到有效A股行情")
+		return out, fmt.Errorf("未获取到有效A股或ETF行情")
 	}
 	return out, nil
 }

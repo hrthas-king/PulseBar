@@ -37,6 +37,7 @@ type customPanel struct {
 	cancel                              uintptr
 	statusError                         bool
 	controls                            []uintptr
+	titleFont                           uintptr
 }
 type editBinding struct {
 	panel    *customPanel
@@ -86,8 +87,18 @@ func (u *UI) openCustomPanel(show bool) {
 	}
 	var pos point
 	getCursor.Call(uintptr(unsafe.Pointer(&pos)))
-	v := newFluentVisuals(u.dpiScale, systemFluentColors())
-	w, h := v.px(400), v.px(336)
+	// Keep the wider panel inside the current monitor's working area, even at high DPI.
+	work := popupWorkArea(pos)
+	scale := u.dpiScale
+	if scale <= 0 {
+		scale = 1
+	}
+	maxScale := min(float64(work.Right-work.Left-16)/520, float64(work.Bottom-work.Top-16)/374)
+	if maxScale > 0 && scale > maxScale {
+		scale = maxScale
+	}
+	v := newFluentVisuals(scale, systemFluentColors())
+	w, h := v.px(520), v.px(374)
 	x, y := pos.X+v.px(8), pos.Y+v.px(8)
 	anchor := rect{pos.X, pos.Y, pos.X + 1, pos.Y + 1}
 	monitor, _, _ := monitorFromRect.Call(uintptr(unsafe.Pointer(&anchor)), 2)
@@ -130,18 +141,24 @@ func (u *UI) openCustomPanel(show bool) {
 		}
 		return control
 	}
-	heading := child("STATIC", "新增自定义组合", 0, 0, 20, 20, 360, 27)
-	sendMessage.Call(heading, 0x30, v.heading, 1)
-	subtitle := child("STATIC", "支持沪深北股票、场内 ETF 和美股", 0, 0, 20, 53, 360, 20)
-	sendMessage.Call(subtitle, 0x30, v.small, 1)
-	child("STATIC", "代码 1", 0, 0, 20, 86, 360, 22)
-	p.first = child("EDIT", "", 0x10000|0x80, 1, 29, 121, 342, 22)
-	child("STATIC", "代码 2", 0, 0, 20, 158, 360, 22)
-	p.second = child("EDIT", "", 0x10000|0x80, 2, 29, 193, 342, 22)
-	p.status = child("STATIC", "例如：513100 + 513500 / AAPL + MSFT\nEnter 添加 · Esc 或点击外部关闭", 0, 0, 20, 232, 360, 37)
+	face := winapi.UTF16("Segoe UI")
+	p.titleFont, _, _ = createFont.Call(uintptr(-int(v.px(23))), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, uintptr(unsafe.Pointer(face)))
+	heading := child("STATIC", "新增自定义组合", 0, 0, 26, 22, 468, 32)
+	if p.titleFont != 0 {
+		sendMessage.Call(heading, 0x30, p.titleFont, 1)
+	} else {
+		sendMessage.Call(heading, 0x30, v.heading, 1)
+	}
+	subtitle := child("STATIC", "支持沪深北股票、场内 ETF 和美股", 0, 0, 26, 63, 468, 22)
+	sendMessage.Call(subtitle, 0x30, v.font, 1)
+	child("STATIC", "代码 1", 0, 0, 26, 99, 468, 22)
+	p.first = child("EDIT", "", 0x10000|0x80, 1, 37, 135, 446, 22)
+	child("STATIC", "代码 2", 0, 0, 26, 183, 468, 22)
+	p.second = child("EDIT", "", 0x10000|0x80, 2, 37, 219, 446, 22)
+	p.status = child("STATIC", "例如：513100 + 513500 / AAPL + MSFT\nEnter 添加 · Esc 或点击外部关闭", 0, 0, 26, 268, 468, 38)
 	sendMessage.Call(p.status, 0x30, v.small, 1)
-	p.cancel = child("BUTTON", "取消", 0x10000|0xb, 4, 172, 280, 88, 36)
-	p.submit = child("BUTTON", "添加并显示", 0x10000|0xb, 3, 272, 280, 108, 36)
+	p.cancel = child("BUTTON", "取消", 0x10000|0xb, 4, 265, 313, 95, 41)
+	p.submit = child("BUTTON", "添加并显示", 0x10000|0xb, 3, 372, 313, 122, 41)
 	if p.first == 0 || p.second == 0 || p.submit == 0 || p.status == 0 || p.cancel == 0 {
 		u.closeCustomPanel()
 		ShowError(fmt.Errorf("无法创建输入控件"))
@@ -256,6 +273,9 @@ func customPanelProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 			}
 		case 0x0082:
 			panelWindows.Delete(hwnd)
+			if p.titleFont != 0 {
+				deleteObject.Call(p.titleFont)
+			}
 			p.visual.close()
 		}
 	}
@@ -344,19 +364,16 @@ func (p *customPanel) drawFrame(dc uintptr) {
 	var bounds rect
 	fluentGetClient.Call(p.hwnd, uintptr(unsafe.Pointer(&bounds)))
 	fillRect.Call(dc, uintptr(unsafe.Pointer(&bounds)), v.background)
-	fluentBox(dc, bounds, v.px(12), c.background, c.border)
+	fluentBox(dc, bounds, v.px(20), c.background, c.border)
 	focus, _, _ := user32.NewProc("GetFocus").Call()
 	for i, edit := range []uintptr{p.first, p.second} {
-		top := 112 + i*72
+		top := 125 + i*84
 		border := c.border
 		if focus == edit {
 			border = c.accent
 		}
-		r := rect{v.px(20), v.px(top), v.px(380), v.px(top + 38)}
-		fluentBox(dc, r, v.px(6), c.input, border)
-		if focus == edit {
-			fluentBox(dc, rect{r.Left + v.px(3), r.Bottom - v.px(2), r.Right - v.px(3), r.Bottom}, v.px(2), c.accent, c.accent)
-		}
+		r := rect{v.px(26), v.px(top), v.px(494), v.px(top + 42)}
+		fluentBox(dc, r, v.px(12), c.input, border)
 	}
 }
 
@@ -372,14 +389,21 @@ func (p *customPanel) drawButton(item *fluentDrawItem) {
 		fill, border = c.hover, c.border
 		text = c.text
 	}
-	fluentBox(item.DC, item.Bounds, v.px(7), fill, border)
+	// Owner-drawn button corners belong to the child window; clear them to the
+	// panel background before painting the rounded button surface.
+	fillRect.Call(item.DC, uintptr(unsafe.Pointer(&item.Bounds)), v.background)
+	if item.State&16 != 0 && item.Window == p.cancel {
+		border = c.accent
+	}
+	fluentBox(item.DC, item.Bounds, v.px(12), fill, border)
 	fluentText(item.DC, panelText(item.Window), item.Bounds, v.font, text, 1)
-	if item.State&16 != 0 && item.State&0x200 == 0 {
+	if item.State&16 != 0 && item.State&0x200 == 0 && item.Window == p.submit {
 		r := item.Bounds
 		r.Left += v.px(3)
 		r.Top += v.px(3)
 		r.Right -= v.px(3)
 		r.Bottom -= v.px(3)
-		fluentFocusRect.Call(item.DC, uintptr(unsafe.Pointer(&r)))
+		fluentBox(item.DC, r, v.px(8), fill, text)
+		fluentText(item.DC, panelText(item.Window), item.Bounds, v.font, text, 1)
 	}
 }

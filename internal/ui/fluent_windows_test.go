@@ -259,7 +259,7 @@ func TestFluentNativeLightDarkRenderingAndInputFocus(t *testing.T) {
 		if dark {
 			mode = "dark"
 		}
-		input := renderFluentBitmap(t, 400, 336, func(dc uintptr) { sendMessage.Call(p.hwnd, 0x317, dc, 4|8|16) })
+		input := renderFluentBitmap(t, 520, 374, func(dc uintptr) { sendMessage.Call(p.hwnd, 0x317, dc, 4|8|16) })
 		pixel := input.NRGBAAt(5, 60)
 		if pixel.R != byte(palette.background) || pixel.G != byte(palette.background>>8) || pixel.B != byte(palette.background>>16) {
 			t.Fatalf("%s panel background: %+v", mode, pixel)
@@ -290,5 +290,29 @@ func TestFluentNativeLightDarkRenderingAndInputFocus(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestCustomPanelDarkButtonColorsAndRoundedCorners(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	u := NewUI("test", config.Default())
+	u.openCustomPanel(false)
+	defer u.closeCustomPanel()
+	p := u.customPanel
+	if p == nil {
+		t.Fatal("input panel missing")
+	}
+	p.visual.refresh(fluentColors(true))
+	img := renderFluentBitmap(t, 122, 41, func(dc uintptr) {
+		p.drawButton(&fluentDrawItem{Window: p.submit, DC: dc, Bounds: rect{0, 0, 122, 41}})
+	})
+	corner := img.NRGBAAt(0, 0)
+	if corner.R != 44 || corner.G != 44 || corner.B != 44 {
+		t.Fatalf("corner should match panel background: %+v", corner)
+	}
+	fill := img.NRGBAAt(12, 20)
+	if fill.R != 96 || fill.G != 205 || fill.B != 255 {
+		t.Fatalf("primary button should retain original light blue: %+v", fill)
 	}
 }

@@ -1,6 +1,26 @@
 # 验证记录 (Validation)
 
-## v0.8.0：自定义组合支持国内ETF与美股（最新）
+## v0.9.0：Fluent 菜单与输入面板（最新）
+
+验证日期：**2026-10-28 美东时间**。
+
+- 按用户确认的范围，仅升级右键/托盘菜单和自定义组合输入面板，透明行情条保持原有绘制方式与外观。
+- 参考 [TranslucentTB 的 MenuFlyout 结构](https://github.com/TranslucentTB/TranslucentTB/blob/release/Xaml/Pages/TrayFlyoutPage.xaml)，独立使用 Win32/GDI 实现深浅色、图标、圆角高亮、统一间距及级联。Windows 11 通过 [DWM 圆角接口](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-rounded-corners)请求系统圆角与边框，实际效果受系统合成器影响；旧系统保留普通边框回退。高对比度或系统屏幕阅读器标志开启时回退原生菜单。
+- 默认完整测试 **55 项**（含子项共 **81 项**）、静态检查、格式检查及 Windows amd64 / arm64 构建通过。两个真实网络/交互测试默认跳过，均在正常 Windows 会话单独开启并通过；ARM64 尚未真机运行。
+- 新增原生测试覆盖菜单动作完整性、当前自定义组选中标记、同一行的选择/删除绑定、方向键级联、Home/End 与长列表滚动、Enter 分发、关闭窗口、20 轮开关后 GDI 资源不持续增长，以及输入框/按钮 Tab 导航和系统字体。
+- 正常 Windows 会话中的可见窗口测试，经过实际菜单创建，再用 More → 最后一项“其他” → 新增组合的级联键盘路径打开面板，确认面板保持可见且输入控件已设置焦点。是否成为全局前台仍受 Windows 规则限制，测试不强行抢占其他应用。
+- 七组真实行情输入、Enter 提交、保存、重新加载、删除/回默认的集成流程全部通过，覆盖国内股票、沪深 ETF、美股股票、美国 ETF、不同股类和中美混合组合。
+- 10 秒完整 GUI 冒烟通过，隔离配置下的纳指/标普500 ETF 两侧报价正常。本轮最终 GUI 私有工作集 **6,008,832 字节（约 5.73 MiB）**，GDI / USER 对象数 **21 / 13**；本机根目录与 dist 已更新为 v0.9.0，实际用户配置内容与更新前一致。
+- README 中的四张预览由实际原生绘制函数离屏渲染，并检查深浅色背景像素；它们用于核对布局与颜色，不作为桌面合成器阴影或透明材质的截图证明。新版采用 Fluent 视觉，没有改变 Windows 任务栏的透明设置。
+
+本轮本机产物 SHA-256（GitHub Actions 工具链不同，可能产生不同哈希）：
+
+```text
+8D796BC61079437817BA657DD1A99961CD581508D5BB2966C18137C36E1F584E  PulseBar.exe / dist/PulseBar-windows-amd64.exe
+682890911E9558615E91D499272890876C3629695ED0163A7EDDC1167D887797  dist/PulseBar-windows-arm64.exe
+```
+
+## v0.8.0：自定义组合支持国内ETF与美股（历史）
 
 验证日期：**2026-10-28 美东时间**。
 

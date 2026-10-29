@@ -74,12 +74,12 @@ func ScaleForAction(act Action) (int, bool) {
 }
 
 var scaleMenuLabels = map[int]string{
-	75:  "75% (迷你 Mini)",
-	85:  "85% (紧凑 Small)",
-	90:  "90% (适中 Medium)",
-	100: "100% (标准 Default)",
-	115: "115% (放大 Large)",
-	130: "130% (特大 Extra Large)",
+	75:  "75% · 迷你",
+	85:  "85% · 紧凑",
+	90:  "90% · 适中",
+	100: "100% · 标准",
+	115: "115% · 放大",
+	130: "130% · 特大",
 }
 
 const (
@@ -267,6 +267,7 @@ type UI struct {
 	Actions        chan Action
 	GroupChanges   chan string
 	customPanel    *customPanel
+	flyout         *fluentMenu
 	customEpoch    uint64
 	customCancel   context.CancelFunc
 	customResults  chan pairValidation
@@ -758,25 +759,25 @@ func (u *UI) showDiagnostics() {
 	messageBox.Call(u.hwnd, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x40)
 }
 
-func (u *UI) menu() {
+func (u *UI) buildMenu() (uintptr, map[Action]customMenuCommand) {
 	menu, _, _ := createMenu.Call()
 	if menu == 0 {
-		return
+		return 0, nil
 	}
-	defer destroyMenu.Call(menu)
 
 	add := func(id Action, label string, flags uintptr) {
 		p := winapi.UTF16(strings.ReplaceAll(label, "&", "&&"))
 		appendMenu.Call(menu, flags, uintptr(id), uintptr(unsafe.Pointer(p)))
 	}
 
+	add(0, "PulseBar  "+u.version, 2)
 	s := u.latest.Load()
 	if s != nil {
 		ip := s.Geo.IP
 		if ip == "" {
 			ip = "查询中/未知"
 		}
-		add(0, fmt.Sprintf("PulseBar [%s] %s | IP: %s", Country(*s), StatusText(s.Status), ip), 2)
+		add(0, fmt.Sprintf("出口 %s · %s · %s", Country(*s), StatusText(s.Status), ip), 2)
 		up, down := "--", "--"
 		if s.Rates.Valid {
 			up, down = Speed(s.Rates.Up), Speed(s.Rates.Down)
@@ -796,16 +797,16 @@ func (u *UI) menu() {
 	}
 	add(ActionToggleNetDetail, "任务栏显示实时网速与延迟", detailFlags)
 
-	lockLabel := "锁定位置（鼠标穿透）"
+	lockFlags := uintptr(0)
 	if u.cfg.Locked {
-		lockLabel = "解锁位置（允许拖动）"
+		lockFlags = 8
 	}
-	add(ActionToggleLock, lockLabel, 0)
+	add(ActionToggleLock, "锁定位置（鼠标穿透）", lockFlags)
 	add(ActionDockLeft, "移到任务栏最左侧", 0)
 
-	colorLabel := "涨跌配色：绿涨红跌（点击切换）"
+	colorLabel := "涨跌配色：绿涨红跌"
 	if u.cfg.UpIsRed {
-		colorLabel = "涨跌配色：红涨绿跌（点击切换）"
+		colorLabel = "涨跌配色：红涨绿跌"
 	}
 	add(ActionToggleColor, colorLabel, 0)
 
@@ -843,7 +844,7 @@ func (u *UI) menu() {
 			appendMenu.Call(moreMenu, 0, uintptr(uint32(ActionGroupVOOQQQ)+uint32(i)), uintptr(unsafe.Pointer(p)))
 		}
 		u.appendCustomMenu(moreMenu, customCommands)
-		moreTitle := winapi.UTF16("More (更多行情标的)")
+		moreTitle := winapi.UTF16("More（更多行情）")
 		appendMenu.Call(menu, 0x10, moreMenu, uintptr(unsafe.Pointer(moreTitle)))
 	}
 
@@ -882,10 +883,10 @@ func (u *UI) menu() {
 			if interval == n {
 				flags = 8
 			}
-			p := winapi.UTF16(fmt.Sprintf("%ds（心跳固定 1s）", n))
+			p := winapi.UTF16(fmt.Sprintf("%d 秒", n))
 			appendMenu.Call(intervalMenu, flags, uintptr(uint32(ActionInterval1)+uint32(i)), uintptr(unsafe.Pointer(p)))
 		}
-		intTitle := winapi.UTF16(fmt.Sprintf("检测/显示间隔 (当前: %ds)", interval))
+		intTitle := winapi.UTF16(fmt.Sprintf("刷新间隔（当前 %d 秒）", interval))
 		appendMenu.Call(menu, 0x10, intervalMenu, uintptr(unsafe.Pointer(intTitle)))
 	}
 	add(0, "", 0x800)
@@ -898,9 +899,21 @@ func (u *UI) menu() {
 	add(ActionAutostart, "开机自启", autoFlags)
 	add(0, "", 0x800)
 	add(ActionExit, "退出", 0)
+	return menu, customCommands
+}
 
+func (u *UI) menu() {
+	u.hideTooltip()
+	menu, customCommands := u.buildMenu()
+	if menu == 0 {
+		return
+	}
+	defer destroyMenu.Call(menu)
 	var p point
 	getCursor.Call(uintptr(unsafe.Pointer(&p)))
+	if !systemFluentColors().nativeMenu && u.showFluentMenu(menu, p, customCommands) {
+		return
+	}
 	setForeground.Call(u.hwnd)
 	cmd, _, _ := trackMenu.Call(menu, 0x100|2, uintptr(p.X), uintptr(p.Y), 0, u.hwnd, 0)
 	postMessage.Call(u.hwnd, 0, 0, 0)
@@ -1198,6 +1211,7 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	u.hwnd = hwnd
 	defer destroyWindow.Call(hwnd)
 	defer u.closeCustomPanel()
+	defer u.closeFluentMenu()
 
 	setLayeredAttrs.Call(hwnd, colorRef(1, 1, 1), 255, 1) // LWA_COLORKEY = 1
 

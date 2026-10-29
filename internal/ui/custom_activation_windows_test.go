@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -46,9 +47,21 @@ func TestVisibleAddFromMenuRemainsOpen(t *testing.T) {
 	})
 	err := u.Run(ctx, func() {
 		setForeground.Call(u.hwnd)
-		menu, _, _ := createMenu.Call()
-		u.handleMenuSelection(uintptr(actionAddCustom), nil)
-		destroyMenu.Call(menu)
+		u.menu()
+		if u.flyout == nil {
+			t.Fatal("Fluent menu did not open")
+		}
+		root := u.flyout.windows[0]
+		for i, e := range root.entries {
+			if strings.HasPrefix(e.label, "More") {
+				root.setHover(i)
+				break
+			}
+		}
+		sendMessage.Call(root.hwnd, 0x100, 39, 0) // More
+		sendMessage.Call(root.hwnd, 0x100, 35, 0) // Other is the last entry.
+		sendMessage.Call(root.hwnd, 0x100, 39, 0) // Other
+		sendMessage.Call(root.hwnd, 0x100, 13, 0) // Add; must close menu before opening the input.
 		panelSetTimer.Call(u.hwnd, 9999, 250, check)
 	})
 	if err != nil {

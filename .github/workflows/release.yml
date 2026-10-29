@@ -50,8 +50,10 @@ jobs:
         run: |
           cp README.md LICENSE assets/PulseBar.ico dist/
           cp -r docs dist/
+          mkdir -p dist/assets
+          cp assets/fluent-*.png dist/assets/
           cd dist
-          zip -r "PulseBar-$RELEASE_VERSION-windows-$RELEASE_ARCH.zip" "PulseBar-windows-$RELEASE_ARCH.exe" PulseBar.ico README.md LICENSE docs
+          zip -r "PulseBar-$RELEASE_VERSION-windows-$RELEASE_ARCH.zip" "PulseBar-windows-$RELEASE_ARCH.exe" PulseBar.ico README.md LICENSE docs assets
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}

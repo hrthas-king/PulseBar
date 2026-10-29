@@ -33,6 +33,10 @@ type customPanel struct {
 	busy                                bool
 	outsideArmed                        bool
 	focusEstablished                    bool
+	visual                              *fluentVisuals
+	cancel                              uintptr
+	statusError                         bool
+	controls                            []uintptr
 }
 type editBinding struct {
 	panel    *customPanel
@@ -45,8 +49,10 @@ func panelText(hwnd uintptr) string {
 	return syscall.UTF16ToString(buf[:])
 }
 func (p *customPanel) setStatus(text string) {
+	p.statusError = !p.busy
 	s := winapi.UTF16(text)
 	setWindowText.Call(p.status, uintptr(unsafe.Pointer(s)))
+	invalidateRect.Call(p.status, 0, 1)
 }
 
 func (u *UI) closeCustomPanel() {
@@ -71,7 +77,7 @@ func (u *UI) openCustomPanel(show bool) {
 		instance, _, _ = getModule.Call(0)
 	}
 	cls := winapi.UTF16("PulseBar.CustomStocks")
-	wc := windowClass{Size: uint32(unsafe.Sizeof(windowClass{})), Procedure: panelProcedure, Instance: instance, Background: 6, ClassName: cls}
+	wc := windowClass{Size: uint32(unsafe.Sizeof(windowClass{})), Style: 0x20000, Procedure: panelProcedure, Instance: instance, ClassName: cls}
 	cursor, _, _ := loadCursor.Call(0, 32512)
 	wc.Cursor = cursor
 	if atom, _, err := registerClass.Call(uintptr(unsafe.Pointer(&wc))); atom == 0 && err != syscall.Errno(1410) {
@@ -80,8 +86,9 @@ func (u *UI) openCustomPanel(show bool) {
 	}
 	var pos point
 	getCursor.Call(uintptr(unsafe.Pointer(&pos)))
-	w, h := u.px(340), u.px(218)
-	x, y := pos.X+u.px(8), pos.Y+u.px(8)
+	v := newFluentVisuals(u.dpiScale, systemFluentColors())
+	w, h := v.px(400), v.px(336)
+	x, y := pos.X+v.px(8), pos.Y+v.px(8)
 	anchor := rect{pos.X, pos.Y, pos.X + 1, pos.Y + 1}
 	monitor, _, _ := monitorFromRect.Call(uintptr(unsafe.Pointer(&anchor)), 2)
 	var info struct {
@@ -105,40 +112,51 @@ func (u *UI) openCustomPanel(show bool) {
 		}
 	}
 	title := winapi.UTF16("新增自定义股票 / ETF组合")
-	hwnd, _, err := createWindow.Call(0x8|0x80, uintptr(unsafe.Pointer(cls)), uintptr(unsafe.Pointer(title)), 0x80000000, uintptr(x), uintptr(y), uintptr(w), uintptr(h), u.hwnd, 0, instance, 0)
+	hwnd, _, err := createWindow.Call(0x8|0x80, uintptr(unsafe.Pointer(cls)), uintptr(unsafe.Pointer(title)), 0x80000000|0x02000000, uintptr(x), uintptr(y), uintptr(w), uintptr(h), u.hwnd, 0, instance, 0) // WS_POPUP | WS_CLIPCHILDREN
 	if hwnd == 0 {
+		v.close()
 		ShowError(winapi.Error("CreateWindowExW", err))
 		return
 	}
-	p := &customPanel{u: u, hwnd: hwnd}
+	p := &customPanel{u: u, hwnd: hwnd, visual: v}
 	u.customPanel = p
 	panelWindows.Store(hwnd, p)
 	child := func(class, text string, style uintptr, id uintptr, l, t, width, height int) uintptr {
 		c, s := winapi.UTF16(class), winapi.UTF16(text)
-		control, _, _ := createWindow.Call(0, uintptr(unsafe.Pointer(c)), uintptr(unsafe.Pointer(s)), 0x40000000|0x10000000|style, uintptr(u.px(l)), uintptr(u.px(t)), uintptr(u.px(width)), uintptr(u.px(height)), hwnd, id, instance, 0)
-		if control != 0 && u.font != 0 {
-			sendMessage.Call(control, 0x30, u.font, 1)
+		control, _, _ := createWindow.Call(0, uintptr(unsafe.Pointer(c)), uintptr(unsafe.Pointer(s)), 0x40000000|0x10000000|style, uintptr(v.px(l)), uintptr(v.px(t)), uintptr(v.px(width)), uintptr(v.px(height)), hwnd, id, instance, 0)
+		if control != 0 {
+			p.controls = append(p.controls, control)
+			sendMessage.Call(control, 0x30, v.font, 1)
 		}
 		return control
 	}
-	child("STATIC", "自定义股票 / ETF组合", 0, 0, 14, 10, 300, 24)
-	child("STATIC", "股票1", 0, 0, 14, 44, 54, 22)
-	p.first = child("EDIT", "", 0x800000|0x10000|0x80, 1, 72, 40, 250, 27)
-	child("STATIC", "股票2", 0, 0, 14, 80, 54, 22)
-	p.second = child("EDIT", "", 0x800000|0x10000|0x80, 2, 72, 76, 250, 27)
-	p.status = child("STATIC", "沪深北6位代码 / 美股代码（如AAPL）\nEnter提交；点击外部关闭", 0, 0, 14, 113, 308, 48)
-	p.submit = child("BUTTON", "添加并显示", 0x10000, 3, 116, 172, 118, 30)
-	child("BUTTON", "取消", 0x10000, 4, 242, 172, 80, 30)
-	if p.first == 0 || p.second == 0 || p.submit == 0 || p.status == 0 {
+	heading := child("STATIC", "新增自定义组合", 0, 0, 20, 20, 360, 27)
+	sendMessage.Call(heading, 0x30, v.heading, 1)
+	subtitle := child("STATIC", "支持沪深北股票、场内 ETF 和美股", 0, 0, 20, 53, 360, 20)
+	sendMessage.Call(subtitle, 0x30, v.small, 1)
+	child("STATIC", "代码 1", 0, 0, 20, 86, 360, 22)
+	p.first = child("EDIT", "", 0x10000|0x80, 1, 29, 121, 342, 22)
+	child("STATIC", "代码 2", 0, 0, 20, 158, 360, 22)
+	p.second = child("EDIT", "", 0x10000|0x80, 2, 29, 193, 342, 22)
+	p.status = child("STATIC", "例如：513100 + 513500 / AAPL + MSFT\nEnter 添加 · Esc 或点击外部关闭", 0, 0, 20, 232, 360, 37)
+	sendMessage.Call(p.status, 0x30, v.small, 1)
+	p.cancel = child("BUTTON", "取消", 0x10000|0xb, 4, 172, 280, 88, 36)
+	p.submit = child("BUTTON", "添加并显示", 0x10000|0xb, 3, 272, 280, 108, 36)
+	if p.first == 0 || p.second == 0 || p.submit == 0 || p.status == 0 || p.cancel == 0 {
 		u.closeCustomPanel()
 		ShowError(fmt.Errorf("无法创建输入控件"))
 		return
 	}
 	for _, edit := range []uintptr{p.first, p.second} {
 		sendMessage.Call(edit, 0xc5, 10, 0) // EM_SETLIMITTEXT: also allow US share classes.
-		original, _, _ := setWindowLongPtr.Call(edit, ^uintptr(3), editProcedure)
-		panelEdits.Store(edit, editBinding{p, original})
+		cue := winapi.UTF16("6位数字或美股代码，如 AAPL")
+		sendMessage.Call(edit, 0x1501, 0, uintptr(unsafe.Pointer(cue)))
 	}
+	for _, control := range []uintptr{p.first, p.second, p.cancel, p.submit} {
+		original, _, _ := setWindowLongPtr.Call(control, ^uintptr(3), editProcedure)
+		panelEdits.Store(control, editBinding{p, original})
+	}
+	applyFluentFrame(hwnd, v.palette)
 	if show {
 		showWindow.Call(hwnd, 5)
 		setForeground.Call(hwnd)
@@ -154,6 +172,50 @@ func customPanelProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 	if value, ok := panelWindows.Load(hwnd); ok {
 		p := value.(*customPanel)
 		switch msg {
+		case 0x318:
+			p.drawFrame(wp)
+			return 0
+		case 0xf:
+			var paint paintStruct
+			dc, _, _ := beginPaint.Call(hwnd, uintptr(unsafe.Pointer(&paint)))
+			p.drawFrame(dc)
+			endPaint.Call(hwnd, uintptr(unsafe.Pointer(&paint)))
+			return 0
+		case 0x14:
+			return 1
+		case 0x133, 0x138:
+			c := p.visual.palette
+			color, bg, brush := c.text, c.background, p.visual.background
+			if lp == p.first || lp == p.second {
+				bg, brush = c.input, p.visual.input
+				if p.busy {
+					color = c.muted
+				}
+			}
+			if lp == p.status {
+				color = c.muted
+				if p.statusError {
+					color = c.danger
+				}
+			}
+			setTextColor.Call(wp, color)
+			fluentSetBk.Call(wp, bg)
+			return brush
+		case 0x2b:
+			if lp != 0 {
+				var item fluentDrawItem
+				rtlMoveMemory.Call(uintptr(unsafe.Pointer(&item)), lp, unsafe.Sizeof(item))
+				p.drawButton(&item)
+				return 1
+			}
+		case 0x1a, 0x31a:
+			p.visual.refresh(systemFluentColors())
+			applyFluentFrame(hwnd, p.visual.palette)
+			invalidateRect.Call(hwnd, 0, 1)
+			for _, child := range p.controls {
+				invalidateRect.Call(child, 0, 1)
+			}
+			return 0
 		case 0x0113: // WM_TIMER: also catch clicks on non-activating taskbar windows.
 			active, _, _ := panelForeground.Call()
 			if active == hwnd {
@@ -194,6 +256,7 @@ func customPanelProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 			}
 		case 0x0082:
 			panelWindows.Delete(hwnd)
+			p.visual.close()
 		}
 	}
 	r, _, _ := defWindowProc.Call(hwnd, uintptr(msg), wp, lp)
@@ -222,7 +285,8 @@ func customEditProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		return r
 	}
 	b := value.(editBinding)
-	if msg == 0x0007 {
+	if msg == 0x0007 || msg == 0x0008 {
+		invalidateRect.Call(b.panel.hwnd, 0, 0)
 		active, _, _ := panelForeground.Call()
 		if active == b.panel.hwnd {
 			b.panel.focusEstablished = true
@@ -234,17 +298,30 @@ func customEditProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 	if msg == 0x0100 {
 		switch wp {
 		case 13:
-			b.panel.u.submitCustomPair()
+			if hwnd == b.panel.cancel {
+				b.panel.u.closeCustomPanel()
+			} else {
+				b.panel.u.submitCustomPair()
+			}
 			return 0
 		case 27:
 			b.panel.u.closeCustomPanel()
 			return 0
 		case 9:
-			next := b.panel.first
-			if hwnd == b.panel.first {
-				next = b.panel.second
+			controls := []uintptr{b.panel.first, b.panel.second, b.panel.cancel, b.panel.submit}
+			shift, _, _ := user32.NewProc("GetKeyState").Call(0x10)
+			step := 1
+			if shift&0x8000 != 0 {
+				step = -1
 			}
-			setFocus.Call(next)
+			if !b.panel.busy {
+				for i, control := range controls {
+					if control == hwnd {
+						setFocus.Call(controls[(i+step+len(controls))%len(controls)])
+						break
+					}
+				}
+			}
 			return 0
 		}
 	}
@@ -253,4 +330,56 @@ func customEditProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 	}
 	r, _, _ := callWindowProc.Call(b.original, hwnd, uintptr(msg), wp, lp)
 	return r
+}
+
+type fluentDrawItem struct {
+	Type, ID, Item, Action, State uint32
+	Window, DC                    uintptr
+	Bounds                        rect
+	Data                          uintptr
+}
+
+func (p *customPanel) drawFrame(dc uintptr) {
+	v, c := p.visual, p.visual.palette
+	var bounds rect
+	fluentGetClient.Call(p.hwnd, uintptr(unsafe.Pointer(&bounds)))
+	fillRect.Call(dc, uintptr(unsafe.Pointer(&bounds)), v.background)
+	fluentBox(dc, bounds, v.px(12), c.background, c.border)
+	focus, _, _ := user32.NewProc("GetFocus").Call()
+	for i, edit := range []uintptr{p.first, p.second} {
+		top := 112 + i*72
+		border := c.border
+		if focus == edit {
+			border = c.accent
+		}
+		r := rect{v.px(20), v.px(top), v.px(380), v.px(top + 38)}
+		fluentBox(dc, r, v.px(6), c.input, border)
+		if focus == edit {
+			fluentBox(dc, rect{r.Left + v.px(3), r.Bottom - v.px(2), r.Right - v.px(3), r.Bottom}, v.px(2), c.accent, c.accent)
+		}
+	}
+}
+
+func (p *customPanel) drawButton(item *fluentDrawItem) {
+	v, c := p.visual, p.visual.palette
+	fill, border, text := c.input, c.border, c.text
+	if item.Window == p.submit {
+		fill, border, text = c.accent, c.accent, c.onAccent
+	}
+	if item.State&4 != 0 {
+		fill, border, text = c.hover, c.border, c.muted
+	} else if item.State&1 != 0 {
+		fill, border = c.hover, c.border
+		text = c.text
+	}
+	fluentBox(item.DC, item.Bounds, v.px(7), fill, border)
+	fluentText(item.DC, panelText(item.Window), item.Bounds, v.font, text, 1)
+	if item.State&16 != 0 && item.State&0x200 == 0 {
+		r := item.Bounds
+		r.Left += v.px(3)
+		r.Top += v.px(3)
+		r.Right -= v.px(3)
+		r.Bottom -= v.px(3)
+		fluentFocusRect.Call(item.DC, uintptr(unsafe.Pointer(&r)))
+	}
 }

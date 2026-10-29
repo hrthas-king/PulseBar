@@ -9,8 +9,8 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/watchlist"
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/watchlist"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 var gbkToWide = winapi.DLL("kernel32.dll").NewProc("MultiByteToWideChar")

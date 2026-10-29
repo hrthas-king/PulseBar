@@ -9,10 +9,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/config"
-	"github.com/hrthas-king/PulseBar/internal/market"
-	"github.com/hrthas-king/PulseBar/internal/watchlist"
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/config"
+	"github.com/hrthas-king/Samuel/internal/market"
+	"github.com/hrthas-king/Samuel/internal/watchlist"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 const actionAddCustom Action = 2001

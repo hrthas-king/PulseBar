@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hrthas-king/PulseBar/internal/ipinfo"
-	"github.com/hrthas-king/PulseBar/internal/market"
-	"github.com/hrthas-king/PulseBar/internal/monitor"
+	"github.com/hrthas-king/Samuel/internal/ipinfo"
+	"github.com/hrthas-king/Samuel/internal/market"
+	"github.com/hrthas-king/Samuel/internal/monitor"
 )
 
 const (

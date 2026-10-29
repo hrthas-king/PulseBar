@@ -15,7 +15,7 @@ try {
         throw 'Missing application icon resource. Run scripts/generate-icons.ps1 first.'
     }
     New-Item -ItemType Directory -Force -Path dist | Out-Null
-    $target = "dist/PulseBar-windows-$Arch.exe"
+    $target = "dist/Samuel-windows-$Arch.exe"
     & $Go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$Version" -o $target ./cmd/pulsebar
     if ($LASTEXITCODE -ne 0) { throw "Go build failed ($LASTEXITCODE)" }
     Get-Item -LiteralPath $target | Select-Object FullName, Length

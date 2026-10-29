@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	"github.com/hrthas-king/PulseBar/internal/watchlist"
+	"github.com/hrthas-king/Samuel/internal/watchlist"
 )
 
 func (c Config) HasMarketGroup(id string) bool {

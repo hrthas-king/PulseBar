@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hrthas-king/PulseBar/internal/config"
+	"github.com/hrthas-king/Samuel/internal/config"
 )
 
 func TestVisibleAddFromMenuRemainsOpen(t *testing.T) {

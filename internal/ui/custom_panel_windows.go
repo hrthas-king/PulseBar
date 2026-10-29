@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 var (

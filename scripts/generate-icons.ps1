@@ -17,7 +17,7 @@ try {
 
     $stage = Join-Path $projectRoot '.artifacts/icon-build'
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    $temporaryExe = Join-Path $stage 'PulseBar.exe'
+    $temporaryExe = Join-Path $stage 'Samuel.exe'
     $env:GOOS = 'windows'
     $env:GOARCH = 'amd64'
     & $Go build -trimpath -ldflags '-s -w -H=windowsgui' -o $temporaryExe ./cmd/pulsebar
@@ -28,8 +28,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'ICO export failed' }
     $icons = @(Get-ChildItem -LiteralPath $stage -Filter '*.ico' -File -Recurse)
     if ($icons.Count -ne 1) { throw 'Expected exactly one application icon' }
-    Copy-Item -LiteralPath $icons[0].FullName -Destination assets/PulseBar.ico -Force
-    Get-Item -LiteralPath assets/PulseBar.ico, cmd/pulsebar/rsrc_windows_amd64.syso, cmd/pulsebar/rsrc_windows_arm64.syso |
+    Copy-Item -LiteralPath $icons[0].FullName -Destination assets/Samuel.ico -Force
+    Get-Item -LiteralPath assets/Samuel.ico, cmd/pulsebar/rsrc_windows_amd64.syso, cmd/pulsebar/rsrc_windows_arm64.syso |
         Select-Object FullName, Length
 } finally {
     foreach ($entry in $savedEnv.GetEnumerator()) {

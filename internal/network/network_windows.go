@@ -12,8 +12,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/monitor"
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/monitor"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 var (
@@ -109,7 +109,7 @@ func NewPinger() (*Pinger, error) {
 		return nil, winapi.Error("IcmpCreateFile", err)
 	}
 	p := &Pinger{handle: h}
-	copy(p.payload[:], "PulseBar connectivity heartbeat!")
+	copy(p.payload[:], "Samuel connectivity heartbeat!")
 	return p, nil
 }
 

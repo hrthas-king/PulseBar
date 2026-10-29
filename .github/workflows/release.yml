@@ -42,18 +42,18 @@ jobs:
           RELEASE_ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o "dist/PulseBar-windows-$RELEASE_ARCH.exe" ./cmd/pulsebar
+          go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o "dist/Samuel.exe" ./cmd/pulsebar
       - name: Bundle documentation
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           RELEASE_ARCH: ${{ matrix.arch }}
         run: |
-          cp README.md LICENSE assets/PulseBar.ico dist/
+          cp README.md LICENSE assets/Samuel.ico dist/
           cp -r docs dist/
           mkdir -p dist/assets
           cp assets/fluent-*.png dist/assets/
           cd dist
-          zip -r "PulseBar-$RELEASE_VERSION-windows-$RELEASE_ARCH.zip" "PulseBar-windows-$RELEASE_ARCH.exe" PulseBar.ico README.md LICENSE docs assets
+          zip -r "Samuel-$RELEASE_VERSION-windows-$RELEASE_ARCH.zip" Samuel.exe Samuel.ico README.md LICENSE docs assets
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}
@@ -79,4 +79,4 @@ jobs:
         run: |
           cd release
           sha256sum *.zip > SHA256SUMS.txt
-          gh release create "$RELEASE_TAG" *.zip SHA256SUMS.txt --verify-tag --generate-notes --title "PulseBar $RELEASE_TAG"
+          gh release create "$RELEASE_TAG" *.zip SHA256SUMS.txt --verify-tag --generate-notes --title "Samuel $RELEASE_TAG"

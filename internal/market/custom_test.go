@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hrthas-king/PulseBar/internal/watchlist"
+	"github.com/hrthas-king/Samuel/internal/watchlist"
 )
 
 func customRow(prefix, code, name, kind string) string {

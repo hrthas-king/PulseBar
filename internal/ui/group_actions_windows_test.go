@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hrthas-king/PulseBar/internal/market"
+	"github.com/hrthas-king/Samuel/internal/market"
 )
 
 func TestMarketGroupActionsIncludeETFPairWithoutCollidingWithScale(t *testing.T) {

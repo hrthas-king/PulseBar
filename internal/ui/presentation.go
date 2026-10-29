@@ -8,10 +8,10 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/hrthas-king/PulseBar/internal/app"
-	"github.com/hrthas-king/PulseBar/internal/ipinfo"
-	"github.com/hrthas-king/PulseBar/internal/market"
-	"github.com/hrthas-king/PulseBar/internal/monitor"
+	"github.com/hrthas-king/Samuel/internal/app"
+	"github.com/hrthas-king/Samuel/internal/ipinfo"
+	"github.com/hrthas-king/Samuel/internal/market"
+	"github.com/hrthas-king/Samuel/internal/monitor"
 )
 
 func Country(s app.Snapshot) string {
@@ -124,7 +124,7 @@ func TrayTooltip(s app.Snapshot) string {
 	if s.Rates.Valid {
 		up, down = CompactSpeed(s.Rates.Up), CompactSpeed(s.Rates.Down)
 	}
-	prefix := fmt.Sprintf("PulseBar [%s] %s\nIP: ", Country(s), StatusText(s.Status))
+	prefix := fmt.Sprintf("Samuel [%s] %s\nIP: ", Country(s), StatusText(s.Status))
 	suffix := fmt.Sprintf(" | HTTPS: %s\n↑%s ↓%s\n%s", CompactRTT(s), up, down, QuoteSummary(s))
 	tip := prefix + ip + suffix
 	if len(utf16.Encode([]rune(tip))) <= 127 {
@@ -195,7 +195,7 @@ func OverlayTooltip(s app.Snapshot) string {
 // DiagnosticsText 生成完整诊断报告（供菜单诊断弹窗或 --probe 使用）。
 func DiagnosticsText(version string, s app.Snapshot) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "PulseBar %s | UTC %s\n", version, time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "Samuel %s | UTC %s\n", version, time.Now().UTC().Format(time.RFC3339))
 	fmt.Fprintf(&b, "================================================================\n")
 	fmt.Fprintf(&b, "[GeoPulse 网络与出口监控]\n")
 	fmt.Fprintf(&b, "  连通状态: %s (%s) | 连续失败: %d\n", StatusText(s.Status), s.Status, s.Failures)

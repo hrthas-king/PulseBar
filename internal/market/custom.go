@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hrthas-king/PulseBar/internal/watchlist"
+	"github.com/hrthas-king/Samuel/internal/watchlist"
 )
 
 var customGroups []GroupSpec // protected by groupMu; replacement never mutates shared maps

@@ -9,7 +9,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 var (
@@ -223,7 +223,7 @@ func (s *fluentMenu) open(entries []fluentEntry, at point, parent *fluentPopup) 
 	if atom, _, err := registerClass.Call(uintptr(unsafe.Pointer(&wc))); atom == 0 && err != syscall.Errno(1410) {
 		return false
 	}
-	title := winapi.UTF16("PulseBar 菜单")
+	title := winapi.UTF16("Samuel 菜单")
 	hwnd, _, _ := createWindow.Call(ex, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), style, uintptr(x), uintptr(y), uintptr(outerWidth), uintptr(outerHeight), s.u.hwnd, 0, instance, 0)
 	if hwnd == 0 {
 		return false
@@ -472,7 +472,7 @@ func (p *fluentPopup) draw(dc uintptr) {
 		if !e.enabled {
 			textColor, font, left = c.muted, v.small, v.px(16)
 		}
-		if strings.HasPrefix(e.label, "PulseBar") {
+		if strings.HasPrefix(e.label, "Samuel") {
 			font, textColor = v.heading, c.text
 		}
 		fluentText(dc, e.label, rect{left, r.Top, r.Right - v.px(30), r.Bottom}, font, textColor, 0)

@@ -14,11 +14,11 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/app"
-	"github.com/hrthas-king/PulseBar/internal/config"
-	"github.com/hrthas-king/PulseBar/internal/market"
-	"github.com/hrthas-king/PulseBar/internal/watchlist"
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/app"
+	"github.com/hrthas-king/Samuel/internal/config"
+	"github.com/hrthas-king/Samuel/internal/market"
+	"github.com/hrthas-king/Samuel/internal/watchlist"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 func TestCustomPairSaveBeforeDisplayAndDeleteFallback(t *testing.T) {

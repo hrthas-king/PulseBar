@@ -25,7 +25,7 @@ var (
 
 func SingleInstance() (release func(), alreadyRunning bool, err error) {
 	nameStr := `Local\PulseBar.Singleton`
-	if os.Getenv("PULSEBAR_TEST_INSTANCE") != "" {
+	if os.Getenv("SAMUEL_TEST_INSTANCE") != "" || os.Getenv("PULSEBAR_TEST_INSTANCE") != "" {
 		nameStr = fmt.Sprintf(`Local\PulseBar.Singleton.%d`, os.Getpid())
 	}
 	name := UTF16(nameStr)
@@ -37,7 +37,7 @@ func SingleInstance() (release func(), alreadyRunning bool, err error) {
 	return release, callErr == syscall.Errno(183), nil
 }
 
-// SendWindowCommand 向当前会话已运行的 PulseBar 窗口投递控制消息（如退出、停靠最左侧、打开诊断）。
+// SendWindowCommand 向当前会话已运行的 Samuel 或旧版 PulseBar 窗口投递控制消息。
 func SendWindowCommand(msg uint32) (bool, error) {
 	user := DLL("user32.dll")
 	name := UTF16(WindowClass)

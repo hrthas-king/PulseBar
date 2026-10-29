@@ -13,9 +13,9 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/config"
-	"github.com/hrthas-king/PulseBar/internal/market"
-	"github.com/hrthas-king/PulseBar/internal/watchlist"
+	"github.com/hrthas-king/Samuel/internal/config"
+	"github.com/hrthas-king/Samuel/internal/market"
+	"github.com/hrthas-king/Samuel/internal/watchlist"
 )
 
 func fluentFind(entries []fluentEntry, prefix string) []fluentEntry {
@@ -43,7 +43,7 @@ func TestFluentMenuPreservesActionsAndSideDelete(t *testing.T) {
 	cfg := config.Default()
 	cfg.CustomPairs = []watchlist.Pair{pair}
 	cfg.MarketGroup = pair.ID()
-	u := NewUI("v0.9.1", cfg)
+	u := NewUI("v1.0.0", cfg)
 	menu, commands := u.buildMenu()
 	defer destroyMenu.Call(menu)
 	entries := readFluentMenu(menu, commands)
@@ -82,7 +82,7 @@ func TestFluentNativeKeyboardCascadeScrollAndClose(t *testing.T) {
 	for i := range children {
 		children[i] = fluentEntry{label: "Saved stock pair", action: ActionRefresh, enabled: true}
 	}
-	entries := []fluentEntry{{label: "PulseBar"}, {label: "Refresh", action: ActionRefresh, enabled: true}, {label: "More", enabled: true, children: children}}
+	entries := []fluentEntry{{label: "Samuel"}, {label: "Refresh", action: ActionRefresh, enabled: true}, {label: "More", enabled: true, children: children}}
 	if !s.open(entries, point{100, 100}, nil) {
 		t.Fatal("popup creation failed")
 	}
@@ -223,7 +223,7 @@ func TestFluentNativeLightDarkRenderingAndInputFocus(t *testing.T) {
 	defer runtime.UnlockOSThread()
 	cfg := config.Default()
 	cfg.UIScalePercent = 75
-	u := NewUI("v0.9.1", cfg)
+	u := NewUI("v1.0.0", cfg)
 	u.openCustomPanel(false)
 	defer u.closeCustomPanel()
 	p := u.customPanel

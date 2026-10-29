@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hrthas-king/PulseBar/internal/watchlist"
+	"github.com/hrthas-king/Samuel/internal/watchlist"
 )
 
 const (

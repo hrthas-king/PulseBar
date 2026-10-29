@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/hrthas-king/PulseBar/internal/watchlist"
+	"github.com/hrthas-king/Samuel/internal/watchlist"
 )
 
 const (
@@ -72,6 +72,10 @@ func Default() Config {
 }
 
 func Path() string {
+	if override := os.Getenv("SAMUEL_CONFIG"); override != "" {
+		return override
+	}
+	// The legacy override and storage directory remain valid across the rename.
 	if override := os.Getenv("PULSEBAR_CONFIG"); override != "" {
 		return override
 	}

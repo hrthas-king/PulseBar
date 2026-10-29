@@ -6,11 +6,11 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/app"
-	"github.com/hrthas-king/PulseBar/internal/config"
-	"github.com/hrthas-king/PulseBar/internal/ipinfo"
-	"github.com/hrthas-king/PulseBar/internal/monitor"
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/app"
+	"github.com/hrthas-king/Samuel/internal/config"
+	"github.com/hrthas-king/Samuel/internal/ipinfo"
+	"github.com/hrthas-king/Samuel/internal/monitor"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 func TestNativeTrayIconIsUpright(t *testing.T) {

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hrthas-king/PulseBar/internal/app"
-	"github.com/hrthas-king/PulseBar/internal/ipinfo"
-	"github.com/hrthas-king/PulseBar/internal/monitor"
-	"github.com/hrthas-king/PulseBar/internal/ui"
+	"github.com/hrthas-king/Samuel/internal/app"
+	"github.com/hrthas-king/Samuel/internal/ipinfo"
+	"github.com/hrthas-king/Samuel/internal/monitor"
+	"github.com/hrthas-king/Samuel/internal/ui"
 )
 
 func TestOnlineEvidenceDoesNotInventLatency(t *testing.T) {

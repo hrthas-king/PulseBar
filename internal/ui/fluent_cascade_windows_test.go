@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hrthas-king/PulseBar/internal/config"
+	"github.com/hrthas-king/Samuel/internal/config"
 )
 
 func mouseMoveFluent(p *fluentPopup, x, y int32) {

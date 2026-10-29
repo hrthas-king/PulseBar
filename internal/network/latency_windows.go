@@ -9,8 +9,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/monitor"
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/monitor"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 const HTTPSLatencyTarget = "https://www.cloudflare.com/cdn-cgi/trace"
@@ -48,7 +48,7 @@ func measureHTTPSLatency(ctx context.Context) (time.Duration, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	agent := winapi.UTF16("PulseBar HTTPS latency")
+	agent := winapi.UTF16("Samuel HTTPS latency")
 	session, _, err := latencyOpen.Call(uintptr(unsafe.Pointer(agent)), 4, 0, 0, 0)
 	if session == 0 {
 		return 0, winapi.Error("WinHttpOpen", err)

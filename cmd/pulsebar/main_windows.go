@@ -13,14 +13,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hrthas-king/PulseBar/internal/app"
-	"github.com/hrthas-king/PulseBar/internal/config"
-	"github.com/hrthas-king/PulseBar/internal/ipinfo"
-	"github.com/hrthas-king/PulseBar/internal/market"
-	"github.com/hrthas-king/PulseBar/internal/network"
-	"github.com/hrthas-king/PulseBar/internal/startup"
-	"github.com/hrthas-king/PulseBar/internal/ui"
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/app"
+	"github.com/hrthas-king/Samuel/internal/config"
+	"github.com/hrthas-king/Samuel/internal/ipinfo"
+	"github.com/hrthas-king/Samuel/internal/market"
+	"github.com/hrthas-king/Samuel/internal/network"
+	"github.com/hrthas-king/Samuel/internal/startup"
+	"github.com/hrthas-king/Samuel/internal/ui"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 var version = "dev"
@@ -33,11 +33,11 @@ func main() {
 	dockLeft := flag.Bool("dock-left", false, "将悬浮条重置停靠到任务栏最左侧")
 	showDiag := flag.Bool("diagnostics", false, "打开当前运行实例的诊断窗口")
 	showVersion := flag.Bool("version", false, "显示版本")
-	quit := flag.Bool("quit", false, "请求当前会话的 PulseBar 正常退出")
+	quit := flag.Bool("quit", false, "请求当前会话的 Samuel 正常退出")
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("PulseBar", version)
+		fmt.Println("Samuel", version)
 		return
 	}
 	if *quit {

@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hrthas-king/PulseBar/internal/app"
-	"github.com/hrthas-king/PulseBar/internal/ipinfo"
-	"github.com/hrthas-king/PulseBar/internal/market"
-	"github.com/hrthas-king/PulseBar/internal/monitor"
+	"github.com/hrthas-king/Samuel/internal/app"
+	"github.com/hrthas-king/Samuel/internal/ipinfo"
+	"github.com/hrthas-king/Samuel/internal/market"
+	"github.com/hrthas-king/Samuel/internal/monitor"
 )
 
 func TestTooltipsAndFormatting(t *testing.T) {
@@ -30,7 +30,7 @@ func TestTooltipsAndFormatting(t *testing.T) {
 	}
 
 	trayTip := TrayTooltip(snap)
-	if !strings.Contains(trayTip, "PulseBar [SG] 正常") || !strings.Contains(trayTip, "VOO 699.05 +0.07%") || !strings.Contains(trayTip, "QQQ 703.55 -0.12%") {
+	if !strings.Contains(trayTip, "Samuel [SG] 正常") || !strings.Contains(trayTip, "VOO 699.05 +0.07%") || !strings.Contains(trayTip, "QQQ 703.55 -0.12%") {
 		t.Fatalf("unexpected tray tooltip:\n%s", trayTip)
 	}
 

@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 var (
@@ -46,7 +46,7 @@ func Fetch(ctx context.Context) (Info, error) {
 }
 
 func fetchHost(ctx context.Context, host string) ([]byte, error) {
-	agent := winapi.UTF16("PulseBar/1.0")
+	agent := winapi.UTF16("Samuel/1.0")
 	session, _, err := open.Call(uintptr(unsafe.Pointer(agent)), 4, 0, 0, 0)
 	if session == 0 {
 		return nil, winapi.Error("WinHttpOpen", err)

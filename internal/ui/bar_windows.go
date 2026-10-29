@@ -13,11 +13,11 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/app"
-	"github.com/hrthas-king/PulseBar/internal/config"
-	"github.com/hrthas-king/PulseBar/internal/market"
-	"github.com/hrthas-king/PulseBar/internal/monitor"
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/app"
+	"github.com/hrthas-king/Samuel/internal/config"
+	"github.com/hrthas-king/Samuel/internal/market"
+	"github.com/hrthas-king/Samuel/internal/monitor"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 type Action uint32
@@ -755,7 +755,7 @@ func (u *UI) showDiagnostics() {
 		snap = *p
 	}
 	report := DiagnosticsText(u.version, snap)
-	text, title := winapi.UTF16(report), winapi.UTF16("PulseBar — 网络与多市场行情诊断")
+	text, title := winapi.UTF16(report), winapi.UTF16("Samuel — 网络与多市场行情诊断")
 	messageBox.Call(u.hwnd, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x40)
 }
 
@@ -770,7 +770,7 @@ func (u *UI) buildMenu() (uintptr, map[Action]customMenuCommand) {
 		appendMenu.Call(menu, flags, uintptr(id), uintptr(unsafe.Pointer(p)))
 	}
 
-	add(0, "PulseBar  "+u.version, 2)
+	add(0, "Samuel  "+u.version, 2)
 	s := u.latest.Load()
 	if s != nil {
 		ip := s.Geo.IP
@@ -1196,7 +1196,7 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	if u.cfg.Locked {
 		exStyle |= 0x20 // WS_EX_TRANSPARENT
 	}
-	title := winapi.UTF16("PulseBar")
+	title := winapi.UTF16("Samuel")
 	hwnd, _, err := createWindow.Call(
 		exStyle,
 		uintptr(unsafe.Pointer(clsName)),
@@ -1258,6 +1258,6 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 }
 
 func ShowError(err error) {
-	text, title := winapi.UTF16(err.Error()), winapi.UTF16("PulseBar")
+	text, title := winapi.UTF16(err.Error()), winapi.UTF16("Samuel")
 	messageBox.Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x10)
 }

@@ -9,10 +9,10 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/hrthas-king/PulseBar/internal/app"
-	"github.com/hrthas-king/PulseBar/internal/ipinfo"
-	"github.com/hrthas-king/PulseBar/internal/market"
-	"github.com/hrthas-king/PulseBar/internal/monitor"
+	"github.com/hrthas-king/Samuel/internal/app"
+	"github.com/hrthas-king/Samuel/internal/ipinfo"
+	"github.com/hrthas-king/Samuel/internal/market"
+	"github.com/hrthas-king/Samuel/internal/monitor"
 )
 
 func TestTrayTooltipPreservesETFQuotesWithLongIPv6(t *testing.T) {
@@ -56,7 +56,7 @@ func TestTrayTooltipPreservesETFQuotesWithLongIPv6(t *testing.T) {
 func TestTrayTooltipKeepsShortIPUnchanged(t *testing.T) {
 	snap := app.Snapshot{Status: monitor.Online, Geo: ipinfo.Info{Country: "US", IP: "198.51.100.1"}}
 	tip := TrayTooltip(snap)
-	want := "PulseBar [US] 正常\nIP: 198.51.100.1 | HTTPS: --\n↑-- ↓--\nVOO -- | QQQ --"
+	want := "Samuel [US] 正常\nIP: 198.51.100.1 | HTTPS: --\n↑-- ↓--\nVOO -- | QQQ --"
 	if tip != want {
 		t.Fatalf("short tray tooltip changed: %q", tip)
 	}

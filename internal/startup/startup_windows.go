@@ -6,11 +6,12 @@ package startup
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
 
-	"github.com/hrthas-king/PulseBar/internal/winapi"
+	"github.com/hrthas-king/Samuel/internal/winapi"
 )
 
 var (
@@ -49,13 +50,30 @@ func Enabled() (bool, error) {
 		return false, syscall.Errno(code)
 	}
 	if kind != 1 {
-		return false, fmt.Errorf("PulseBar 自启项不是 REG_SZ")
+		return false, fmt.Errorf("Samuel 自启项不是 REG_SZ")
 	}
 	exe, err := os.Executable()
 	if err != nil {
 		return false, err
 	}
-	return strings.EqualFold(syscall.UTF16ToString(data[:]), `"`+exe+`"`), nil
+	value := syscall.UTF16ToString(data[:])
+	if strings.EqualFold(value, `"`+exe+`"`) {
+		return true, nil
+	}
+	// Preserve an enabled startup setting when the renamed executable replaces
+	// PulseBar.exe in the same directory. Never migrate another installation.
+	if legacyStartupMatches(value, exe) {
+		if err := Set(true); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func legacyStartupMatches(value, executable string) bool {
+	legacy := filepath.Join(filepath.Dir(executable), "PulseBar.exe")
+	return strings.EqualFold(value, `"`+legacy+`"`)
 }
 
 func Set(enabled bool) error {

@@ -17,6 +17,7 @@ try {
         $previewAssets = Join-Path $stage 'assets'
         New-Item -ItemType Directory -Force -Path $previewAssets | Out-Null
         Get-ChildItem -LiteralPath assets -Filter 'fluent-*.png' | Copy-Item -Destination $previewAssets -Force
+        Get-ChildItem -LiteralPath assets -Filter 'capitalization-*.png' | Copy-Item -Destination $previewAssets -Force
         $zip = "$stage.zip"
         Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
         Get-FileHash -LiteralPath $zip -Algorithm SHA256 | Select-Object Path, Hash

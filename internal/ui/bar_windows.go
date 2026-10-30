@@ -252,6 +252,8 @@ type UI struct {
 	brushRed       uintptr
 	brushGray      uintptr
 	font           uintptr
+	stockFont      uintptr
+	capFont        uintptr
 	data           notifyIcon
 	icons          map[string]uintptr
 	appIcon        uintptr
@@ -318,8 +320,17 @@ func (u *UI) rebuildFonts() {
 	if u.font != 0 {
 		deleteObject.Call(u.font)
 	}
+	if u.capFont != 0 {
+		deleteObject.Call(u.capFont)
+	}
+	if u.stockFont != 0 {
+		deleteObject.Call(u.stockFont)
+	}
 	fontName := winapi.UTF16("Segoe UI")
 	u.font, _, _ = createFont.Call(uintptr(int(-u.px(14))), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 3, 0, uintptr(unsafe.Pointer(fontName)))
+	u.stockFont, _, _ = createFont.Call(uintptr(int(-u.px(12))), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 3, 0, uintptr(unsafe.Pointer(fontName)))
+	u.capFont, _, _ = createFont.Call(uintptr(int(-u.px(9))), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 3, 0, uintptr(unsafe.Pointer(fontName)))
+	runtime.KeepAlive(fontName)
 }
 
 func (u *UI) SetAutostart(enabled bool) { u.startup.Store(enabled) }
@@ -578,6 +589,10 @@ func (u *UI) setTrayIcon(style string) error {
 }
 
 func (u *UI) drawFlowText(dc uintptr, text string, leftPx int32, color uintptr) int32 {
+	return u.drawFlowTextRow(dc, text, leftPx, color, 0, u.height)
+}
+
+func (u *UI) drawFlowTextRow(dc uintptr, text string, leftPx int32, color uintptr, top, bottom int32) int32 {
 	if text == "" {
 		return leftPx
 	}
@@ -586,7 +601,7 @@ func (u *UI) drawFlowText(dc uintptr, text string, leftPx int32, color uintptr) 
 	var sz textSize
 	getTextExtentPoint32.Call(dc, uintptr(unsafe.Pointer(&enc[0])), uintptr(len(enc)), uintptr(unsafe.Pointer(&sz)))
 	rightPx := leftPx + sz.CX + max(2, u.px(2))
-	rc := rect{Left: leftPx, Top: 0, Right: rightPx, Bottom: u.height}
+	rc := rect{Left: leftPx, Top: top, Right: rightPx, Bottom: bottom}
 	ptr := winapi.UTF16(text)
 	drawText.Call(dc, uintptr(unsafe.Pointer(ptr)), ^uintptr(0), uintptr(unsafe.Pointer(&rc)), 0x20|0x4|0x8000)
 	runtime.KeepAlive(ptr)
@@ -666,6 +681,10 @@ func (u *UI) paint(hwnd uintptr) {
 		return
 	}
 	defer endPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+	u.drawBar(dc, hwnd)
+}
+
+func (u *UI) drawBar(dc, hwnd uintptr) {
 
 	rc := rect{Left: 0, Top: 0, Right: u.width, Bottom: u.height}
 	fillRect.Call(dc, uintptr(unsafe.Pointer(&rc)), u.bgBrush)
@@ -742,27 +761,41 @@ func (u *UI) paint(hwnd uintptr) {
 			})
 		}
 	}
+	twoRows := false
+	for _, view := range views {
+		if view.Quote != nil && view.Quote.IsEquity() {
+			twoRows = true
+			break
+		}
+	}
+	rowBottom, quoteCenter := u.height, centerY
+	if twoRows {
+		rowBottom = u.px(17)
+		quoteCenter = rowBottom / 2
+		selectObject.Call(dc, u.stockFont)
+	}
 	for i, v := range views {
 		iconCenterX := curX + dotRadius + u.px(1)
 		switch v.EffectiveState() {
 		case market.StatePreMarket:
-			u.drawYellowSunPx(dc, iconCenterX, centerY)
+			u.drawYellowSunPx(dc, iconCenterX, quoteCenter)
 		case market.StateOvernight:
-			u.drawPurpleMoonPx(dc, iconCenterX, centerY)
+			u.drawPurpleMoonPx(dc, iconCenterX, quoteCenter)
 		case market.StateRegular:
-			u.drawCirclePx(dc, u.brushGreen, iconCenterX, centerY, dotRadius)
+			u.drawCirclePx(dc, u.brushGreen, iconCenterX, quoteCenter, dotRadius)
 		case market.StatePostMarket:
-			u.drawCirclePx(dc, u.brushBlue, iconCenterX, centerY, dotRadius)
+			u.drawCirclePx(dc, u.brushBlue, iconCenterX, quoteCenter, dotRadius)
 		default:
-			u.drawCirclePx(dc, u.brushGray, iconCenterX, centerY, dotRadius)
+			u.drawCirclePx(dc, u.brushGray, iconCenterX, quoteCenter, dotRadius)
 		}
 		curX += dotRadius*2 + u.px(6)
 
 		if !v.Healthy {
-			curX = u.drawFlowText(dc, "!", curX, colorRef(255, 82, 82)) + u.px(3)
+			curX = u.drawFlowTextRow(dc, "!", curX, colorRef(255, 82, 82), 0, rowBottom) + u.px(3)
 		}
 
-		curX = u.drawFlowText(dc, v.DisplayName(), curX, colorRef(240, 240, 240)) + u.px(5)
+		nameLeft := curX
+		curX = u.drawFlowTextRow(dc, v.DisplayName(), curX, colorRef(240, 240, 240), 0, rowBottom) + u.px(5)
 
 		text := "---.-- --.--%"
 		pctColor := colorRef(170, 170, 170)
@@ -777,7 +810,13 @@ func (u *UI) paint(hwnd uintptr) {
 				pctColor = colorRef(119, 204, 153)
 			}
 		}
-		curX = u.drawFlowText(dc, text, curX, pctColor)
+		curX = u.drawFlowTextRow(dc, text, curX, pctColor, 0, rowBottom)
+		if v.Quote != nil && v.Quote.IsEquity() {
+			prior, _, _ := selectObject.Call(dc, u.capFont)
+			capRight := u.drawFlowTextRow(dc, v.Quote.CapitalizationText(), nameLeft, colorRef(175, 185, 198), rowBottom, u.height)
+			selectObject.Call(dc, prior)
+			curX = max(curX, capRight)
+		}
 		if i == 0 && len(views) > 1 {
 			curX += u.px(7)
 			curX = u.drawFlowText(dc, "|", curX, colorRef(120, 130, 145)) + u.px(7)
@@ -791,7 +830,9 @@ func (u *UI) paint(hwnd uintptr) {
 	}
 	if neededW > u.width || diff > u.px(8) {
 		u.width = neededW
-		setWindowPos.Call(hwnd, ^uintptr(0), 0, 0, uintptr(u.width), uintptr(u.height), 0x0002|0x0010)
+		if hwnd != 0 {
+			setWindowPos.Call(hwnd, ^uintptr(0), 0, 0, uintptr(u.width), uintptr(u.height), 0x0002|0x0010)
+		}
 	}
 }
 
@@ -1266,7 +1307,7 @@ func (u *UI) Run(ctx context.Context, ready func()) error {
 	u.rebuildFonts()
 
 	defer func() {
-		for _, obj := range []uintptr{u.font, u.bgBrush, u.brushGreen, u.brushBlue, u.brushYellow, u.brushRed, u.brushGray} {
+		for _, obj := range []uintptr{u.font, u.stockFont, u.capFont, u.bgBrush, u.brushGreen, u.brushBlue, u.brushYellow, u.brushRed, u.brushGray} {
 			if obj != 0 {
 				deleteObject.Call(obj)
 			}

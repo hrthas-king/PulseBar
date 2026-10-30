@@ -225,25 +225,26 @@ func (e HTTPError) Error() string {
 }
 
 type Quote struct {
-	Symbol         string       `json:"symbol"`
-	Alias          string       `json:"alias"`
-	Price          float64      `json:"price"`
-	ChangePercent  float64      `json:"change_percent"`
-	ChangeAbs      float64      `json:"change_abs"`
-	RegularPrice   float64      `json:"regular_price"`
-	Currency       string       `json:"currency,omitempty"`
-	QuoteType      string       `json:"quote_type,omitempty"`
-	MarketState    string       `json:"market_state,omitempty"`
-	State          SessionState `json:"session_state"`
-	TradeTime      int64        `json:"trade_time,omitempty"`
-	QuoteSource    string       `json:"quote_source,omitempty"`
-	UpdateMode     string       `json:"update_mode"`
-	Session        string       `json:"session"`
-	Description    string       `json:"description"`
-	RTTMs          float64      `json:"rtt_ms"`
-	ProviderSymbol string       `json:"provider_symbol,omitempty"`
-	Reference      bool         `json:"reference,omitempty"`
-	DelaySeconds   int          `json:"delay_seconds,omitempty"`
+	Symbol         string          `json:"symbol"`
+	Alias          string          `json:"alias"`
+	Price          float64         `json:"price"`
+	ChangePercent  float64         `json:"change_percent"`
+	ChangeAbs      float64         `json:"change_abs"`
+	RegularPrice   float64         `json:"regular_price"`
+	Currency       string          `json:"currency,omitempty"`
+	QuoteType      string          `json:"quote_type,omitempty"`
+	MarketState    string          `json:"market_state,omitempty"`
+	State          SessionState    `json:"session_state"`
+	TradeTime      int64           `json:"trade_time,omitempty"`
+	QuoteSource    string          `json:"quote_source,omitempty"`
+	UpdateMode     string          `json:"update_mode"`
+	Session        string          `json:"session"`
+	Description    string          `json:"description"`
+	RTTMs          float64         `json:"rtt_ms"`
+	ProviderSymbol string          `json:"provider_symbol,omitempty"`
+	Reference      bool            `json:"reference,omitempty"`
+	DelaySeconds   int             `json:"delay_seconds,omitempty"`
+	Capitalization *Capitalization `json:"capitalization,omitempty"`
 }
 
 func (q Quote) Previous() float64 {
@@ -311,34 +312,35 @@ type yahooQuoteBatchResponse struct {
 }
 
 type yahooQuoteItem struct {
-	Symbol                       string   `json:"symbol"`
-	Currency                     string   `json:"currency"`
-	QuoteType                    string   `json:"quoteType"`
-	ShortName                    string   `json:"shortName"`
-	LongName                     string   `json:"longName"`
-	MarketState                  string   `json:"marketState"`
-	QuoteSourceName              string   `json:"quoteSourceName"`
-	GMTOffsetMilliseconds        int64    `json:"gmtOffSetMilliseconds"`
-	RegularMarketPrice           *float64 `json:"regularMarketPrice"`
-	RegularMarketChange          *float64 `json:"regularMarketChange"`
-	RegularMarketChangePercent   *float64 `json:"regularMarketChangePercent"`
-	RegularMarketTime            *int64   `json:"regularMarketTime"`
-	RegularMarketPreviousClose   *float64 `json:"regularMarketPreviousClose"`
-	PreMarketPrice               *float64 `json:"preMarketPrice"`
-	PreMarketChange              *float64 `json:"preMarketChange"`
-	PreMarketChangePercent       *float64 `json:"preMarketChangePercent"`
-	PreMarketTime                *int64   `json:"preMarketTime"`
-	PostMarketPrice              *float64 `json:"postMarketPrice"`
-	PostMarketChange             *float64 `json:"postMarketChange"`
-	PostMarketChangePercent      *float64 `json:"postMarketChangePercent"`
-	PostMarketTime               *int64   `json:"postMarketTime"`
-	OvernightMarketPrice         *float64 `json:"overnightMarketPrice"`
-	OvernightMarketChange        *float64 `json:"overnightMarketChange"`
-	OvernightMarketChangePercent *float64 `json:"overnightMarketChangePercent"`
-	OvernightMarketTime          *int64   `json:"overnightMarketTime"`
-	FulldayPrice                 *float64 `json:"fulldayPrice"`
-	FulldayChange                *float64 `json:"fulldayChange"`
-	FulldayChangePercent         *float64 `json:"fulldayChangePercent"`
+	Symbol                       string          `json:"symbol"`
+	Currency                     string          `json:"currency"`
+	QuoteType                    string          `json:"quoteType"`
+	ShortName                    string          `json:"shortName"`
+	LongName                     string          `json:"longName"`
+	MarketState                  string          `json:"marketState"`
+	QuoteSourceName              string          `json:"quoteSourceName"`
+	GMTOffsetMilliseconds        int64           `json:"gmtOffSetMilliseconds"`
+	RegularMarketPrice           *float64        `json:"regularMarketPrice"`
+	RegularMarketChange          *float64        `json:"regularMarketChange"`
+	RegularMarketChangePercent   *float64        `json:"regularMarketChangePercent"`
+	RegularMarketTime            *int64          `json:"regularMarketTime"`
+	RegularMarketPreviousClose   *float64        `json:"regularMarketPreviousClose"`
+	PreMarketPrice               *float64        `json:"preMarketPrice"`
+	PreMarketChange              *float64        `json:"preMarketChange"`
+	PreMarketChangePercent       *float64        `json:"preMarketChangePercent"`
+	PreMarketTime                *int64          `json:"preMarketTime"`
+	PostMarketPrice              *float64        `json:"postMarketPrice"`
+	PostMarketChange             *float64        `json:"postMarketChange"`
+	PostMarketChangePercent      *float64        `json:"postMarketChangePercent"`
+	PostMarketTime               *int64          `json:"postMarketTime"`
+	OvernightMarketPrice         *float64        `json:"overnightMarketPrice"`
+	OvernightMarketChange        *float64        `json:"overnightMarketChange"`
+	OvernightMarketChangePercent *float64        `json:"overnightMarketChangePercent"`
+	OvernightMarketTime          *int64          `json:"overnightMarketTime"`
+	FulldayPrice                 *float64        `json:"fulldayPrice"`
+	FulldayChange                *float64        `json:"fulldayChange"`
+	FulldayChangePercent         *float64        `json:"fulldayChangePercent"`
+	MarketCap                    json.RawMessage `json:"marketCap"`
 }
 
 type sessionCandidate struct {
@@ -1129,6 +1131,7 @@ func parseYahooQuoteItem(item yahooQuoteItem, rttMs float64, now time.Time) (Quo
 	if err := ValidateQuote(q); err != nil {
 		return Quote{}, err
 	}
+	q.setYahooCapitalization(item.MarketCap, regPrice)
 	return q, nil
 }
 
@@ -1141,21 +1144,22 @@ type yahooChartResponse struct {
 }
 
 type yahooMeta struct {
-	Currency                   string   `json:"currency"`
-	Symbol                     string   `json:"symbol"`
-	InstrumentType             string   `json:"instrumentType"`
-	MarketState                string   `json:"marketState"`
-	ShortName                  string   `json:"shortName"`
-	LongName                   string   `json:"longName"`
-	GMTOffset                  int64    `json:"gmtoffset"`
-	RegularMarketTime          int64    `json:"regularMarketTime"`
-	RegularMarketPrice         *float64 `json:"regularMarketPrice"`
-	RegularMarketChangePercent *float64 `json:"regularMarketChangePercent"`
-	ChartPreviousClose         *float64 `json:"chartPreviousClose"`
-	PreviousClose              *float64 `json:"previousClose"`
-	FulldayPrice               *float64 `json:"fulldayPrice"`
-	FulldayChange              *float64 `json:"fulldayChange"`
-	FulldayChangePercent       *float64 `json:"fulldayChangePercent"`
+	Currency                   string          `json:"currency"`
+	Symbol                     string          `json:"symbol"`
+	InstrumentType             string          `json:"instrumentType"`
+	MarketState                string          `json:"marketState"`
+	ShortName                  string          `json:"shortName"`
+	LongName                   string          `json:"longName"`
+	GMTOffset                  int64           `json:"gmtoffset"`
+	RegularMarketTime          int64           `json:"regularMarketTime"`
+	RegularMarketPrice         *float64        `json:"regularMarketPrice"`
+	RegularMarketChangePercent *float64        `json:"regularMarketChangePercent"`
+	ChartPreviousClose         *float64        `json:"chartPreviousClose"`
+	PreviousClose              *float64        `json:"previousClose"`
+	FulldayPrice               *float64        `json:"fulldayPrice"`
+	FulldayChange              *float64        `json:"fulldayChange"`
+	FulldayChangePercent       *float64        `json:"fulldayChangePercent"`
+	MarketCap                  json.RawMessage `json:"marketCap"`
 }
 
 // ParseYahooChart 解析单标的 /v8/finance/chart 备用接口行情，兼容 ETF、正股与全球指数。
@@ -1247,6 +1251,7 @@ func ParseYahooChart(expectedSymbol string, body []byte, rttMs float64, now time
 	if err := ValidateQuote(q); err != nil {
 		return Quote{}, err
 	}
+	q.setYahooCapitalization(m.MarketCap, regPrice)
 	return q, nil
 }
 
@@ -1362,7 +1367,7 @@ func (v View) Tooltip() string {
 		}
 		return fmt.Sprintf("%s %s: %.*f (%+.2f%%, 涨跌 %+.*f, 常规收盘 %.*f) | %s\n  %s；时段: %s %s%s%s；%s",
 			stateBadge, name, decimals, v.Quote.Price, v.Quote.ChangePercent, decimals, v.Quote.ChangeAbs, decimals, v.Quote.RegularPrice, status,
-			description, stateBadge, session, srcInfo, tradeInfo, fetched)
+			description, stateBadge, session, srcInfo, tradeInfo, fetched) + v.Quote.capitalizationTooltip()
 	}
 	description := TickerFor(v.Symbol)
 	if isTrackedSZETF(v.Symbol) {

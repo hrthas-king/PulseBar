@@ -36,7 +36,7 @@ const (
 		"Cache-Control: no-cache\r\n" +
 		"Pragma: no-cache\r\n"
 
-	quoteFields = "symbol,shortName,longName,currency,quoteType,marketState,quoteSourceName,gmtOffSetMilliseconds," +
+	quoteFields = "symbol,shortName,longName,currency,quoteType,marketState,quoteSourceName,gmtOffSetMilliseconds,marketCap," +
 		"regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketTime,regularMarketPreviousClose," +
 		"preMarketPrice,preMarketChange,preMarketChangePercent,preMarketTime," +
 		"postMarketPrice,postMarketChange,postMarketChangePercent,postMarketTime," +
@@ -48,6 +48,9 @@ var (
 	clientMu    sync.Mutex
 	sessHandle  uintptr
 	cachedCrumb string
+	cachedCNY   fxQuote
+	fxFetchedAt time.Time
+	fxNextTry   time.Time
 )
 
 func ensureSessionLocked() (uintptr, error) {
@@ -115,10 +118,49 @@ func Fetch(ctx context.Context) (map[string]SymbolResult, error) {
 
 	clientMu.Lock()
 	defer clientMu.Unlock()
+	var batch map[string]SymbolResult
+	var err error
 	if strings.HasPrefix(group.ID, "custom_") {
-		return fetchCustomQuoteBatch(ctx, group.Symbols, fetchSymbolsLocked)
+		batch, err = fetchCustomQuoteBatch(ctx, group.Symbols, fetchSymbolsLocked)
+	} else {
+		batch, err = fetchSymbolsLocked(ctx, group.Symbols)
 	}
-	return fetchSymbolsLocked(ctx, group.Symbols)
+	enrichCapitalizationLocked(ctx, batch)
+	return batch, err
+}
+
+func enrichCapitalizationLocked(ctx context.Context, batch map[string]SymbolResult) {
+	needsFX := false
+	for _, result := range batch {
+		if q := result.Quote; q != nil && q.IsEquity() && q.Currency == "CNY" && q.Capitalization != nil {
+			needsFX = true
+		}
+	}
+	if !needsFX {
+		return
+	}
+	now := time.Now()
+	if now.Sub(fxFetchedAt) >= time.Minute && !now.Before(fxNextTry) {
+		fxNextTry = now.Add(15 * time.Second)
+		if session, err := ensureSessionLocked(); err == nil {
+			fxCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			for _, host := range []string{PrimaryHost, FallbackHost} {
+				status, body, err := doHTTPGet(fxCtx, session, host, "/v8/finance/chart/CNY%3DX?interval=1d&range=1d", false)
+				if err == nil && status == 200 {
+					if rate, err := parseCNYRate(body, now); err == nil {
+						cachedCNY, fxFetchedAt = rate, now
+						break
+					}
+				}
+			}
+			cancel()
+		}
+	}
+	// A failed FX refresh must neither block stock prices nor retain an old
+	// conversion indefinitely. The provider timestamp remains visible.
+	if now.Sub(fxFetchedAt) <= 5*time.Minute && cachedCNY.at >= now.Add(-72*time.Hour).Unix() {
+		convertCapitalizationUSD(batch, cachedCNY)
+	}
 }
 
 func fetchSymbolsLocked(ctx context.Context, syms []string) (map[string]SymbolResult, error) {

@@ -168,6 +168,9 @@ func parseCustomQuoteBatch(symbols []string, body []byte, rtt float64, now time.
 			if err := ValidateQuote(q); err != nil {
 				return SymbolResult{Err: err.Error()}
 			}
+			if total, err := strconv.ParseFloat(strings.TrimSpace(parts[45]), 64); err == nil {
+				q.setCapitalization(total*1e8, price, "Tencent Finance 总市值（亿元人民币）")
+			}
 			return SymbolResult{Quote: &q}
 		}()
 		out[sym] = result
